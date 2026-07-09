@@ -4,6 +4,10 @@ import crypto from "crypto";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
+const ALLOWED_BANKER_IDS = (process.env.ALLOWED_BANKER_IDS || "229051,207252")
+    .split(",")
+    .map(id => String(id).trim())
+    .filter(Boolean);
 const SPIN_DURATION_MS = 4300;
 
 const app = express();
@@ -11,7 +15,7 @@ app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders:
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const adminTokens = new Set();
+const adminTokens = new Map();
 
 const state = {
     bets: [],
@@ -37,7 +41,15 @@ const wheel = [
 
 function publicState() {
     return {
-        bets: state.bets,
+        bets: state.bets.map(b => ({
+            playerId: b.playerId,
+            playerName: b.playerName,
+            amount: b.amount,
+            confirmed: b.confirmed,
+            createdAt: b.createdAt,
+            updatedAt: b.updatedAt,
+            outcomeMode: b.outcomeMode || "random"
+        })),
         history: state.history,
         spinning: state.spinning,
         activeSpin: state.activeSpin,
@@ -57,6 +69,10 @@ function pickMultiplier() {
     return 1;
 }
 
+function isAllowedBankerId(bankerId) {
+    return ALLOWED_BANKER_IDS.includes(String(bankerId || ""));
+}
+
 function isAdminToken(token) {
     return token && adminTokens.has(String(token));
 }
@@ -74,9 +90,38 @@ function requireAdmin(req, res) {
     return true;
 }
 
+function pickForcedMultiplier(mode) {
+    const cleanMode = String(mode || "random").toLowerCase();
+
+    if (cleanMode === "win") {
+        const winningOptions = wheel.filter(item => Number(item.multiplier) > 1);
+        return pickMultiplierFromOptions(winningOptions.length ? winningOptions : wheel);
+    }
+
+    if (cleanMode === "lose") {
+        const losingOptions = wheel.filter(item => Number(item.multiplier) < 1);
+        return pickMultiplierFromOptions(losingOptions.length ? losingOptions : wheel);
+    }
+
+    return pickMultiplier();
+}
+
+function pickMultiplierFromOptions(options) {
+    const total = options.reduce((sum, item) => sum + item.weight, 0);
+    let roll = crypto.randomInt(1, total + 1);
+
+    for (const item of options) {
+        roll -= item.weight;
+        if (roll <= 0) return item.multiplier;
+    }
+
+    return options[0]?.multiplier ?? 1;
+}
+
 function buildSpinResults() {
     return state.bets.map(b => {
-        const multiplier = pickMultiplier();
+        const outcomeMode = String(b.outcomeMode || "random").toLowerCase();
+        const multiplier = pickForcedMultiplier(outcomeMode);
         const payout = Math.floor(Number(b.amount) * multiplier);
 
         return {
@@ -85,7 +130,8 @@ function buildSpinResults() {
             amount: b.amount,
             multiplier,
             payout,
-            profit: payout - b.amount
+            profit: payout - b.amount,
+            outcomeMode
         };
     });
 }
@@ -130,22 +176,50 @@ app.post("/place-bet", (req, res) => {
         existing.playerName = playerName;
         existing.amount = amount;
         existing.confirmed = false;
+        existing.outcomeMode = "random";
         existing.updatedAt = Date.now();
     } else {
-        state.bets.push({ playerId, playerName, amount, confirmed: false, createdAt: Date.now() });
+        state.bets.push({ playerId, playerName, amount, confirmed: false, outcomeMode: "random", createdAt: Date.now() });
     }
 
     res.json({ ok: true, state: publicState() });
 });
 
 app.post("/admin-login", (req, res) => {
+    const bankerId = String(req.body?.bankerId || "").trim();
+
+    if (!isAllowedBankerId(bankerId)) {
+        return res.status(403).json({ ok: false, error: "Not an allowed banker ID" });
+    }
+
     if (String(req.body?.pin || "") !== ADMIN_PIN) {
         return res.status(403).json({ ok: false, error: "Bad PIN" });
     }
 
     const token = crypto.randomBytes(24).toString("hex");
-    adminTokens.add(token);
+    adminTokens.set(token, { bankerId, createdAt: Date.now() });
     res.json({ ok: true, token });
+});
+
+app.post("/set-bet-outcome", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (state.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+
+    const playerId = String(req.body?.playerId || "").trim();
+    const outcomeMode = String(req.body?.outcomeMode || "random").toLowerCase();
+
+    if (!playerId) return res.status(400).json({ ok: false, error: "Missing player ID" });
+    if (!["random", "win", "lose"].includes(outcomeMode)) {
+        return res.status(400).json({ ok: false, error: "Invalid outcome mode" });
+    }
+
+    const bet = state.bets.find(b => String(b.playerId) === playerId);
+    if (!bet) return res.status(404).json({ ok: false, error: "Bet not found" });
+
+    bet.outcomeMode = outcomeMode;
+    bet.updatedAt = Date.now();
+
+    res.json({ ok: true, state: publicState() });
 });
 
 app.post("/confirm-all", (req, res) => {
@@ -192,4 +266,5 @@ app.post("/spin", (req, res) => {
 app.listen(PORT, () => {
     console.log(`TT Shared Wheel server running on port ${PORT}`);
     console.log(`Banker PIN: ${ADMIN_PIN}`);
+    console.log(`Allowed banker IDs: ${ALLOWED_BANKER_IDS.join(", ")}`);
 });
