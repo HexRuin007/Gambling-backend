@@ -14,20 +14,19 @@ app.use(express.urlencoded({ extended: true }));
 const adminTokens = new Set();
 
 const wheel = [
-    { multiplier: 0, weight: 14 },
+    { multiplier: 0, weight: 15 },
     { multiplier: 0.1, weight: 16 },
-    { multiplier: 0.25, weight: 14 },
-    { multiplier: 0.5, weight: 13 },
-    { multiplier: 0.75, weight: 10 },
-    { multiplier: 1, weight: 9 },
+    { multiplier: 0.25, weight: 15 },
+    { multiplier: 0.5, weight: 14 },
+    { multiplier: 0.75, weight: 12 },
+    { multiplier: 1, weight: 10 },
     { multiplier: 1.25, weight: 8 },
-    { multiplier: 1.5, weight: 6 },
-    { multiplier: 2, weight: 5 },
-    { multiplier: 3, weight: 3 },
+    { multiplier: 1.5, weight: 5 },
+    { multiplier: 2, weight: 3 },
+    { multiplier: 3, weight: 1 },
     { multiplier: 5, weight: 1 },
-    { multiplier: 10, weight: 1 }
+    { multiplier: 10, weight: 0 }
 ];
-
 const state = {
     wheel: {
         bets: [],
