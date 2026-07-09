@@ -18,16 +18,18 @@ const wheel = [
     { multiplier: 0.1,  weight: 12 },
     { multiplier: 0.25, weight: 11 },
     { multiplier: 0.5,  weight: 10 },
-    { multiplier: 0.75, weight: 10 }, // Total losing = 55
+    { multiplier: 0.75, weight: 10 },
 
-    { multiplier: 1,    weight: 5 },  // Break even = 5
+    { multiplier: 1,    weight: 5 },
 
     { multiplier: 1.25, weight: 15 },
     { multiplier: 1.5,  weight: 10 },
     { multiplier: 2,    weight: 7 },
     { multiplier: 3,    weight: 4 },
     { multiplier: 5,    weight: 3 },
-    { multiplier: 10,   weight: 1 },  // Total winning = 40
+    { multiplier: 10,   weight: 1 }
+];
+
 const state = {
     wheel: {
         bets: [],
