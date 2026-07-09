@@ -74,12 +74,11 @@ function requireAdmin(req, res) {
     return true;
 }
 
-function finishSpin(spinId) {
-    if (!state.activeSpin || state.activeSpin.spinId !== spinId) return;
-
-    const multiplier = state.activeSpin.multiplier;
-    const results = state.bets.map(b => {
+function buildSpinResults() {
+    return state.bets.map(b => {
+        const multiplier = pickMultiplier();
         const payout = Math.floor(Number(b.amount) * multiplier);
+
         return {
             playerId: b.playerId,
             playerName: b.playerName,
@@ -89,8 +88,16 @@ function finishSpin(spinId) {
             profit: payout - b.amount
         };
     });
+}
 
-    state.history.unshift({ spinId, multiplier, results, createdAt: Date.now() });
+function finishSpin(spinId) {
+    if (!state.activeSpin || state.activeSpin.spinId !== spinId) return;
+
+    const results = Array.isArray(state.activeSpin.results)
+        ? state.activeSpin.results
+        : buildSpinResults();
+
+    state.history.unshift({ spinId, results, createdAt: Date.now() });
     state.history = state.history.slice(0, 50);
     state.bets = [];
     state.spinning = false;
@@ -163,12 +170,19 @@ app.post("/spin", (req, res) => {
     if (!state.bets.length) return res.status(400).json({ ok: false, error: "No bets" });
     if (state.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
 
-    const multiplier = pickMultiplier();
     const spinId = crypto.randomBytes(8).toString("hex");
     const startedAt = Date.now();
+    const results = buildSpinResults();
+    const previewMultiplier = results.length ? results[0].multiplier : 1;
 
     state.spinning = true;
-    state.activeSpin = { spinId, multiplier, startedAt, durationMs: SPIN_DURATION_MS };
+    state.activeSpin = {
+        spinId,
+        multiplier: previewMultiplier,
+        results,
+        startedAt,
+        durationMs: SPIN_DURATION_MS
+    };
 
     setTimeout(() => finishSpin(spinId), SPIN_DURATION_MS);
 
