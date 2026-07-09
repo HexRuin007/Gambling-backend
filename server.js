@@ -27,7 +27,7 @@ const wheel = [
     { multiplier: 2,    weight: 7 },
     { multiplier: 3,    weight: 4 },
     { multiplier: 5,    weight: 3 },
-    { multiplier: 10,   weight: 1 }   // Total winning = 40
+    { multiplier: 10,   weight: 1 },  // Total winning = 40
 const state = {
     wheel: {
         bets: [],
