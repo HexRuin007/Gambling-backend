@@ -4,10 +4,6 @@ import crypto from "crypto";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const ALLOWED_BANKER_IDS = (process.env.ALLOWED_BANKER_IDS || "229051,207252")
-    .split(",")
-    .map(id => String(id).trim())
-    .filter(Boolean);
 const SPIN_DURATION_MS = 4300;
 
 const app = express();
@@ -15,14 +11,7 @@ app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders:
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-const adminTokens = new Map();
-
-const state = {
-    bets: [],
-    history: [],
-    spinning: false,
-    activeSpin: null
-};
+const adminTokens = new Set();
 
 const wheel = [
     { multiplier: 0, weight: 14 },
@@ -39,23 +28,23 @@ const wheel = [
     { multiplier: 10, weight: 1 }
 ];
 
-function publicState() {
-    return {
-        bets: state.bets.map(b => ({
-            playerId: b.playerId,
-            playerName: b.playerName,
-            amount: b.amount,
-            confirmed: b.confirmed,
-            createdAt: b.createdAt,
-            updatedAt: b.updatedAt,
-            outcomeMode: b.outcomeMode || "random"
-        })),
-        history: state.history,
-        spinning: state.spinning,
-        activeSpin: state.activeSpin,
-        wheel: wheel.map(item => item.multiplier)
-    };
-}
+const state = {
+    wheel: {
+        bets: [],
+        history: [],
+        spinning: false,
+        activeSpin: null
+    },
+    blackjack: {
+        bets: [],
+        players: [],
+        dealerHand: [],
+        deck: [],
+        status: "waiting", // waiting, playing, finished
+        currentTurnIndex: 0,
+        history: []
+    }
+};
 
 function pickMultiplier() {
     const total = wheel.reduce((sum, item) => sum + item.weight, 0);
@@ -67,10 +56,6 @@ function pickMultiplier() {
     }
 
     return 1;
-}
-
-function isAllowedBankerId(bankerId) {
-    return ALLOWED_BANKER_IDS.includes(String(bankerId || ""));
 }
 
 function isAdminToken(token) {
@@ -90,80 +75,198 @@ function requireAdmin(req, res) {
     return true;
 }
 
-function pickForcedMultiplier(mode) {
-    const cleanMode = String(mode || "random").toLowerCase();
-
-    if (cleanMode === "win") {
-        const winningOptions = wheel.filter(item => Number(item.multiplier) > 1);
-        return pickMultiplierFromOptions(winningOptions.length ? winningOptions : wheel);
-    }
-
-    if (cleanMode === "lose") {
-        const losingOptions = wheel.filter(item => Number(item.multiplier) < 1);
-        return pickMultiplierFromOptions(losingOptions.length ? losingOptions : wheel);
-    }
-
-    return pickMultiplier();
+function publicWheelState() {
+    return {
+        bets: state.wheel.bets,
+        history: state.wheel.history,
+        spinning: state.wheel.spinning,
+        activeSpin: state.wheel.activeSpin,
+        wheel: wheel.map(item => item.multiplier)
+    };
 }
 
-function pickMultiplierFromOptions(options) {
-    const total = options.reduce((sum, item) => sum + item.weight, 0);
-    let roll = crypto.randomInt(1, total + 1);
+function makeDeck() {
+    const suits = ["♠", "♥", "♦", "♣"];
+    const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+    const deck = [];
 
-    for (const item of options) {
-        roll -= item.weight;
-        if (roll <= 0) return item.multiplier;
+    for (const suit of suits) {
+        for (const rank of ranks) {
+            deck.push({ rank, suit });
+        }
     }
 
-    return options[0]?.multiplier ?? 1;
+    for (let i = deck.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+
+    return deck;
 }
 
-function buildSpinResults() {
-    return state.bets.map(b => {
-        const outcomeMode = String(b.outcomeMode || "random").toLowerCase();
-        const multiplier = pickForcedMultiplier(outcomeMode);
-        const payout = Math.floor(Number(b.amount) * multiplier);
+function drawCard() {
+    if (!state.blackjack.deck.length) state.blackjack.deck = makeDeck();
+    return state.blackjack.deck.pop();
+}
 
-        return {
-            playerId: b.playerId,
-            playerName: b.playerName,
-            amount: b.amount,
-            multiplier,
-            payout,
-            profit: payout - b.amount,
-            outcomeMode
-        };
+function handValue(hand) {
+    let total = 0;
+    let aces = 0;
+
+    for (const card of hand) {
+        if (card.rank === "A") {
+            total += 11;
+            aces += 1;
+        } else if (["K", "Q", "J"].includes(card.rank)) {
+            total += 10;
+        } else {
+            total += Number(card.rank);
+        }
+    }
+
+    while (total > 21 && aces > 0) {
+        total -= 10;
+        aces -= 1;
+    }
+
+    return total;
+}
+
+function activeBlackjackPlayer() {
+    if (state.blackjack.status !== "playing") return null;
+    return state.blackjack.players[state.blackjack.currentTurnIndex] || null;
+}
+
+function moveToNextBlackjackTurn() {
+    while (state.blackjack.currentTurnIndex < state.blackjack.players.length - 1) {
+        state.blackjack.currentTurnIndex += 1;
+        const player = state.blackjack.players[state.blackjack.currentTurnIndex];
+        if (player && player.status === "playing") return;
+    }
+
+    finishBlackjackRound();
+}
+
+function finishBlackjackRound() {
+    const bj = state.blackjack;
+
+    bj.status = "finished";
+    bj.currentTurnIndex = -1;
+
+    while (handValue(bj.dealerHand) < 17) {
+        bj.dealerHand.push(drawCard());
+    }
+
+    const dealerTotal = handValue(bj.dealerHand);
+    const dealerBust = dealerTotal > 21;
+
+    bj.players.forEach(player => {
+        const total = handValue(player.hand);
+        let result = "lose";
+        let payout = 0;
+
+        if (total > 21) {
+            result = "bust";
+            payout = 0;
+        } else if (dealerBust || total > dealerTotal) {
+            result = "win";
+            payout = player.blackjack ? Math.floor(player.amount * 2.5) : player.amount * 2;
+        } else if (total === dealerTotal) {
+            result = "push";
+            payout = player.amount;
+        } else {
+            result = "lose";
+            payout = 0;
+        }
+
+        player.status = result;
+        player.payout = payout;
+        player.profit = payout - player.amount;
     });
+
+    bj.history.unshift({
+        createdAt: Date.now(),
+        dealerHand: bj.dealerHand,
+        dealerTotal,
+        results: bj.players.map(p => ({
+            playerId: p.playerId,
+            playerName: p.playerName,
+            amount: p.amount,
+            hand: p.hand,
+            total: handValue(p.hand),
+            result: p.status,
+            payout: p.payout,
+            profit: p.profit
+        }))
+    });
+    bj.history = bj.history.slice(0, 20);
 }
 
-function finishSpin(spinId) {
-    if (!state.activeSpin || state.activeSpin.spinId !== spinId) return;
+function publicBlackjackState() {
+    const bj = state.blackjack;
+    const active = activeBlackjackPlayer();
 
-    const results = Array.isArray(state.activeSpin.results)
-        ? state.activeSpin.results
-        : buildSpinResults();
+    return {
+        bets: bj.bets,
+        players: bj.players.map(p => ({
+            playerId: p.playerId,
+            playerName: p.playerName,
+            amount: p.amount,
+            hand: p.hand,
+            total: handValue(p.hand),
+            status: p.status,
+            payout: p.payout || 0,
+            profit: p.profit || 0,
+            blackjack: !!p.blackjack
+        })),
+        dealerHand: bj.status === "playing" ? [bj.dealerHand[0], { rank: "?", suit: "" }] : bj.dealerHand,
+        dealerTotal: bj.status === "playing" ? null : handValue(bj.dealerHand),
+        status: bj.status,
+        currentTurnId: active ? active.playerId : "",
+        currentTurnName: active ? active.playerName : "",
+        history: bj.history
+    };
+}
 
-    state.history.unshift({ spinId, results, createdAt: Date.now() });
-    state.history = state.history.slice(0, 50);
-    state.bets = [];
-    state.spinning = false;
-    state.activeSpin = null;
+function publicState() {
+    return {
+        wheel: publicWheelState(),
+        blackjack: publicBlackjackState()
+    };
+}
+
+function finishWheelSpin(spinId) {
+    const active = state.wheel.activeSpin;
+    if (!active || active.spinId !== spinId) return;
+
+    const results = active.results.map(r => ({ ...r }));
+    state.wheel.history.unshift({ spinId, results, createdAt: Date.now() });
+    state.wheel.history = state.wheel.history.slice(0, 50);
+    state.wheel.bets = [];
+    state.wheel.spinning = false;
+    state.wheel.activeSpin = null;
 }
 
 app.get("/", (req, res) => {
-    res.json({ ok: true, app: "TT Shared Wheel", bets: state.bets.length, spinning: state.spinning });
+    res.json({ ok: true, app: "TT Shared Casino", wheelBets: state.wheel.bets.length, blackjackStatus: state.blackjack.status });
 });
 
-app.get("/health", (req, res) => {
-    res.json({ ok: true });
+app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/state", (req, res) => res.json({ ok: true, state: publicState() }));
+
+app.post("/admin-login", (req, res) => {
+    if (String(req.body?.pin || "") !== ADMIN_PIN) {
+        return res.status(403).json({ ok: false, error: "Bad PIN" });
+    }
+
+    const token = crypto.randomBytes(24).toString("hex");
+    adminTokens.add(token);
+    res.json({ ok: true, token });
 });
 
-app.get("/state", (req, res) => {
-    res.json({ ok: true, state: publicState() });
-});
-
+// Wheel routes
 app.post("/place-bet", (req, res) => {
-    if (state.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
 
     const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
     const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
@@ -171,100 +274,178 @@ app.post("/place-bet", (req, res) => {
 
     if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid bet" });
 
-    const existing = state.bets.find(b => b.playerId === playerId);
+    const existing = state.wheel.bets.find(b => b.playerId === playerId);
     if (existing) {
         existing.playerName = playerName;
         existing.amount = amount;
         existing.confirmed = false;
-        existing.outcomeMode = "random";
         existing.updatedAt = Date.now();
     } else {
-        state.bets.push({ playerId, playerName, amount, confirmed: false, outcomeMode: "random", createdAt: Date.now() });
+        state.wheel.bets.push({ playerId, playerName, amount, confirmed: false, createdAt: Date.now() });
     }
-
-    res.json({ ok: true, state: publicState() });
-});
-
-app.post("/admin-login", (req, res) => {
-    const bankerId = String(req.body?.bankerId || "").trim();
-
-    if (!isAllowedBankerId(bankerId)) {
-        return res.status(403).json({ ok: false, error: "Not an allowed banker ID" });
-    }
-
-    if (String(req.body?.pin || "") !== ADMIN_PIN) {
-        return res.status(403).json({ ok: false, error: "Bad PIN" });
-    }
-
-    const token = crypto.randomBytes(24).toString("hex");
-    adminTokens.set(token, { bankerId, createdAt: Date.now() });
-    res.json({ ok: true, token });
-});
-
-app.post("/set-bet-outcome", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    if (state.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
-
-    const playerId = String(req.body?.playerId || "").trim();
-    const outcomeMode = String(req.body?.outcomeMode || "random").toLowerCase();
-
-    if (!playerId) return res.status(400).json({ ok: false, error: "Missing player ID" });
-    if (!["random", "win", "lose"].includes(outcomeMode)) {
-        return res.status(400).json({ ok: false, error: "Invalid outcome mode" });
-    }
-
-    const bet = state.bets.find(b => String(b.playerId) === playerId);
-    if (!bet) return res.status(404).json({ ok: false, error: "Bet not found" });
-
-    bet.outcomeMode = outcomeMode;
-    bet.updatedAt = Date.now();
 
     res.json({ ok: true, state: publicState() });
 });
 
 app.post("/confirm-all", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (state.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
 
-    state.bets.forEach(b => b.confirmed = true);
+    state.wheel.bets.forEach(b => b.confirmed = true);
     res.json({ ok: true, state: publicState() });
 });
 
 app.post("/clear-round", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (state.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
 
-    state.bets = [];
+    state.wheel.bets = [];
     res.json({ ok: true, state: publicState() });
 });
 
 app.post("/spin", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (state.spinning) return res.status(409).json({ ok: false, error: "Already spinning" });
-    if (!state.bets.length) return res.status(400).json({ ok: false, error: "No bets" });
-    if (state.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
+    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Already spinning" });
+    if (!state.wheel.bets.length) return res.status(400).json({ ok: false, error: "No bets" });
+    if (state.wheel.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
 
     const spinId = crypto.randomBytes(8).toString("hex");
     const startedAt = Date.now();
-    const results = buildSpinResults();
-    const previewMultiplier = results.length ? results[0].multiplier : 1;
+    const results = state.wheel.bets.map(b => {
+        const multiplier = pickMultiplier();
+        const payout = Math.floor(Number(b.amount) * multiplier);
+        return {
+            playerId: b.playerId,
+            playerName: b.playerName,
+            amount: b.amount,
+            multiplier,
+            payout,
+            profit: payout - b.amount
+        };
+    });
 
-    state.spinning = true;
-    state.activeSpin = {
-        spinId,
-        multiplier: previewMultiplier,
-        results,
-        startedAt,
-        durationMs: SPIN_DURATION_MS
-    };
+    state.wheel.spinning = true;
+    state.wheel.activeSpin = { spinId, startedAt, durationMs: SPIN_DURATION_MS, results };
 
-    setTimeout(() => finishSpin(spinId), SPIN_DURATION_MS);
+    setTimeout(() => finishWheelSpin(spinId), SPIN_DURATION_MS);
+    res.json({ ok: true, spin: state.wheel.activeSpin, state: publicState() });
+});
 
-    res.json({ ok: true, spin: state.activeSpin, state: publicState() });
+// Blackjack routes
+app.post("/blackjack/place-bet", (req, res) => {
+    const bj = state.blackjack;
+    if (bj.status === "playing") return res.status(409).json({ ok: false, error: "Blackjack round already running" });
+
+    const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
+    const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
+    const amount = Math.floor(Number(req.body?.amount || 0));
+
+    if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid blackjack bet" });
+
+    const existing = bj.bets.find(b => b.playerId === playerId);
+    if (existing) {
+        existing.playerName = playerName;
+        existing.amount = amount;
+        existing.confirmed = false;
+        existing.updatedAt = Date.now();
+    } else {
+        bj.bets.push({ playerId, playerName, amount, confirmed: false, createdAt: Date.now() });
+    }
+
+    if (bj.status === "finished") {
+        bj.players = [];
+        bj.dealerHand = [];
+        bj.status = "waiting";
+    }
+
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/blackjack/confirm-all", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (state.blackjack.status === "playing") return res.status(409).json({ ok: false, error: "Round already running" });
+
+    state.blackjack.bets.forEach(b => b.confirmed = true);
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/blackjack/start", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const bj = state.blackjack;
+    if (bj.status === "playing") return res.status(409).json({ ok: false, error: "Round already running" });
+    if (!bj.bets.length) return res.status(400).json({ ok: false, error: "No blackjack bets" });
+    if (bj.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
+
+    bj.deck = makeDeck();
+    bj.dealerHand = [drawCard(), drawCard()];
+    bj.players = bj.bets.map(b => {
+        const hand = [drawCard(), drawCard()];
+        const total = handValue(hand);
+        return {
+            playerId: b.playerId,
+            playerName: b.playerName,
+            amount: b.amount,
+            hand,
+            status: total === 21 ? "stand" : "playing",
+            blackjack: total === 21
+        };
+    });
+    bj.bets = [];
+    bj.status = "playing";
+    bj.currentTurnIndex = 0;
+
+    while (bj.players[bj.currentTurnIndex] && bj.players[bj.currentTurnIndex].status !== "playing") {
+        bj.currentTurnIndex += 1;
+    }
+
+    if (bj.currentTurnIndex >= bj.players.length) finishBlackjackRound();
+
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/blackjack/hit", (req, res) => {
+    const bj = state.blackjack;
+    const playerId = String(req.body?.playerId || "");
+    const player = activeBlackjackPlayer();
+
+    if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
+
+    player.hand.push(drawCard());
+    const total = handValue(player.hand);
+    if (total > 21) {
+        player.status = "bust";
+        moveToNextBlackjackTurn();
+    }
+
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/blackjack/stand", (req, res) => {
+    const playerId = String(req.body?.playerId || "");
+    const player = activeBlackjackPlayer();
+
+    if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
+
+    player.status = "stand";
+    moveToNextBlackjackTurn();
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/blackjack/reset", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    state.blackjack.bets = [];
+    state.blackjack.players = [];
+    state.blackjack.dealerHand = [];
+    state.blackjack.deck = [];
+    state.blackjack.status = "waiting";
+    state.blackjack.currentTurnIndex = 0;
+
+    res.json({ ok: true, state: publicState() });
 });
 
 app.listen(PORT, () => {
-    console.log(`TT Shared Wheel server running on port ${PORT}`);
+    console.log(`TT Shared Casino server running on port ${PORT}`);
     console.log(`Banker PIN: ${ADMIN_PIN}`);
-    console.log(`Allowed banker IDs: ${ALLOWED_BANKER_IDS.join(", ")}`);
 });
