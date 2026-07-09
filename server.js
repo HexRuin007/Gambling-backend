@@ -50,7 +50,7 @@ const state = {
         horses: [
             { id: "Nunu", name: "Nunu Royale" },
             { id: "Pxpe", name: "Pxpe Express" },
-            { id: "phantom", name: "Paleto Phantom" },
+            { id: "Crack", name: "WhipCrack" },
             { id: "rocket", name: "Sandy Rocket" },
             { id: "storm", name: "Vespucci Storm" },
             { id: "bullet", name: "LS Bullet" }
