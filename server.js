@@ -43,6 +43,20 @@ const state = {
         status: "waiting", // waiting, playing, finished
         currentTurnIndex: 0,
         history: []
+    },
+    racing: {
+        horses: [
+            { id: "thunder", name: "Tycoon Thunder" },
+            { id: "comet", name: "Chumash Comet" },
+            { id: "phantom", name: "Paleto Phantom" },
+            { id: "rocket", name: "Sandy Rocket" },
+            { id: "storm", name: "Vespucci Storm" },
+            { id: "bullet", name: "LS Bullet" }
+        ],
+        bets: [],
+        history: [],
+        racing: false,
+        activeRace: null
     }
 };
 
@@ -228,10 +242,41 @@ function publicBlackjackState() {
     };
 }
 
+
+function publicRacingState() {
+    const race = state.racing;
+    return {
+        horses: race.horses,
+        bets: race.bets,
+        history: race.history,
+        racing: race.racing,
+        activeRace: race.activeRace
+    };
+}
+
+function finishHorseRace(raceId) {
+    const race = state.racing;
+    const active = race.activeRace;
+    if (!active || active.raceId !== raceId) return;
+
+    race.history.unshift({
+        raceId,
+        winnerHorseId: active.winnerHorseId,
+        winnerHorseName: active.winnerHorseName,
+        results: active.results,
+        placements: active.placements,
+        createdAt: Date.now()
+    });
+    race.history = race.history.slice(0, 30);
+    race.bets = [];
+    race.racing = false;
+    race.activeRace = null;
+}
 function publicState() {
     return {
         wheel: publicWheelState(),
-        blackjack: publicBlackjackState()
+        blackjack: publicBlackjackState(),
+        racing: publicRacingState()
     };
 }
 
@@ -248,7 +293,7 @@ function finishWheelSpin(spinId) {
 }
 
 app.get("/", (req, res) => {
-    res.json({ ok: true, app: "TT Shared Casino", wheelBets: state.wheel.bets.length, blackjackStatus: state.blackjack.status });
+    res.json({ ok: true, app: "TT Shared Casino", wheelBets: state.wheel.bets.length, blackjackStatus: state.blackjack.status, racingBets: state.racing.bets.length, racing: state.racing.racing });
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
@@ -443,6 +488,96 @@ app.post("/blackjack/reset", (req, res) => {
     state.blackjack.currentTurnIndex = 0;
 
     res.json({ ok: true, state: publicState() });
+});
+
+
+// Horse racing routes
+app.post("/racing/place-bet", (req, res) => {
+    const race = state.racing;
+    if (race.racing) return res.status(409).json({ ok: false, error: "Race already running" });
+
+    const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
+    const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
+    const amount = Math.floor(Number(req.body?.amount || 0));
+    const horseId = String(req.body?.horseId || "");
+    const horse = race.horses.find(h => h.id === horseId);
+
+    if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid race bet" });
+    if (!horse) return res.status(400).json({ ok: false, error: "Choose a horse" });
+
+    const existing = race.bets.find(b => b.playerId === playerId);
+    if (existing) {
+        existing.playerName = playerName;
+        existing.amount = amount;
+        existing.horseId = horse.id;
+        existing.horseName = horse.name;
+        existing.confirmed = false;
+        existing.updatedAt = Date.now();
+    } else {
+        race.bets.push({ playerId, playerName, amount, horseId: horse.id, horseName: horse.name, confirmed: false, createdAt: Date.now() });
+    }
+
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/racing/confirm-all", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (state.racing.racing) return res.status(409).json({ ok: false, error: "Race already running" });
+
+    state.racing.bets.forEach(b => b.confirmed = true);
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/racing/clear", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    if (state.racing.racing) return res.status(409).json({ ok: false, error: "Race already running" });
+
+    state.racing.bets = [];
+    res.json({ ok: true, state: publicState() });
+});
+
+app.post("/racing/start", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const race = state.racing;
+    if (race.racing) return res.status(409).json({ ok: false, error: "Race already running" });
+    if (!race.bets.length) return res.status(400).json({ ok: false, error: "No racing bets" });
+    if (race.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
+
+    const raceId = crypto.randomBytes(8).toString("hex");
+    const shuffled = race.horses.map(h => ({ ...h, speed: crypto.randomInt(70, 101), burst: crypto.randomInt(0, 31) }))
+        .sort((a, b) => (b.speed + b.burst) - (a.speed + a.burst));
+    const winner = shuffled[0];
+    const odds = Math.max(2, Math.floor((race.horses.length - 1) * 1.25));
+
+    const results = race.bets.map(b => {
+        const won = b.horseId === winner.id;
+        const payout = won ? b.amount * odds : 0;
+        return {
+            playerId: b.playerId,
+            playerName: b.playerName,
+            amount: b.amount,
+            horseId: b.horseId,
+            horseName: b.horseName,
+            won,
+            payout,
+            profit: payout - b.amount
+        };
+    });
+
+    race.racing = true;
+    race.activeRace = {
+        raceId,
+        startedAt: Date.now(),
+        durationMs: 6500,
+        winnerHorseId: winner.id,
+        winnerHorseName: winner.name,
+        placements: shuffled.map((h, index) => ({ place: index + 1, id: h.id, name: h.name })),
+        results
+    };
+
+    setTimeout(() => finishHorseRace(raceId), race.activeRace.durationMs);
+    res.json({ ok: true, race: race.activeRace, state: publicState() });
 });
 
 app.listen(PORT, () => {
