@@ -6,9 +6,10 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "@socket.io/redis-adapter": "latest",
     "cors": "latest",
-    "express": "latest",
-    "socket.io": "latest"
+    "express": "latest"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
