@@ -46,7 +46,7 @@ const state = {
     racing: {
         horses: [
             { id: "thunder", name: "Tycoon Thunder" },
-            { id: "comet", name: "Chumash Comet" },
+            { id: "Pxpe", name: "Pxpe Express" },
             { id: "phantom", name: "Paleto Phantom" },
             { id: "rocket", name: "Sandy Rocket" },
             { id: "storm", name: "Vespucci Storm" },
