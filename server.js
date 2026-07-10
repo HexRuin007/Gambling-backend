@@ -883,7 +883,13 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
-app.get("/state", (req, res) => res.json({ ok: true, state: publicState() }));
+app.get("/state", (req, res) => {
+    res.json({
+        ok: true,
+        serverTime: Date.now(),
+        state: publicState()
+    });
+});
 
 app.post("/admin-login", (req, res) => {
     if (String(req.body?.pin || "") !== ADMIN_PIN) {
