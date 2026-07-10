@@ -10,6 +10,7 @@ const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
+const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
 const SLOT_FREE_SPINS_AWARD = { 3: 8, 4: 12, 5: 20 };
 const MINES_BOARD_SIZE = 25;
@@ -260,18 +261,54 @@ function rememberPlayer(playerId, playerName) {
     const id = cleanPlayerId(playerId);
     if (!id) return;
 
+    const name = playerName
+        ? cleanPlayerName(playerName)
+        : (
+            state.chips.playerNames[id] ||
+            "Player"
+        );
+
     if (playerName) {
-        state.chips.playerNames[id] = cleanPlayerName(playerName);
+        state.chips.playerNames[id] = name;
     }
 
-    if (
+    const isNewPlayer =
         !Object.prototype.hasOwnProperty.call(
             state.chips.balances,
             id
-        )
-    ) {
-        state.chips.balances[id] = 0;
+        );
+
+    if (!isNewPlayer) {
+        return;
     }
+
+    state.chips.balances[id] =
+        NEW_PLAYER_STARTING_CHIPS;
+
+    state.chips.transactions.unshift({
+        transactionId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId: id,
+        playerName: name,
+        amount: NEW_PLAYER_STARTING_CHIPS,
+        type: "welcome-bonus",
+        gameType: "",
+        note:
+            "Automatic new-player starting chips",
+        balanceAfter:
+            NEW_PLAYER_STARTING_CHIPS,
+        createdAt: Date.now()
+    });
+
+    state.chips.transactions =
+        state.chips.transactions.slice(0, 200);
+
+    queueChipSave();
+
+    console.log(
+        `New player ${id} received ` +
+        `${NEW_PLAYER_STARTING_CHIPS} starting chips`
+    );
 }
 
 function getChipBalance(playerId) {
