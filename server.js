@@ -66,7 +66,7 @@ const state = {
         history: [],
         racing: false,
         activeRace: null
-    }
+    };
     function cleanPlayerId(value) {
     return String(value || "").trim().slice(0, 80);
 }
