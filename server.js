@@ -12,6 +12,11 @@ const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const SLOT_MAX_HISTORY = 100;
 const SLOT_FREE_SPINS_AWARD = { 3: 8, 4: 12, 5: 20 };
+const MINES_BOARD_SIZE = 25;
+const MINES_MIN_COUNT = 1;
+const MINES_MAX_COUNT = 10;
+const MINES_HOUSE_FACTOR = 0.97;
+const MINES_MAX_HISTORY = 100;
 const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
@@ -54,6 +59,11 @@ const state = {
         history: [],
         freeSpins: {},
         lastPaidBet: {}
+    },
+
+    mines: {
+        games: {},
+        history: []
     },
 
     wheel: {
@@ -145,6 +155,17 @@ function loadChipData() {
             }
         }
 
+        if (saved.mines && typeof saved.mines === "object") {
+            if (saved.mines.games && typeof saved.mines.games === "object") {
+                state.mines.games = saved.mines.games;
+            }
+
+            if (Array.isArray(saved.mines.history)) {
+                state.mines.history =
+                    saved.mines.history.slice(0, MINES_MAX_HISTORY);
+            }
+        }
+
         console.log(
             `Loaded chip balances for ${
                 Object.keys(state.chips.balances).length
@@ -176,6 +197,10 @@ function saveChipDataImmediately() {
                 history: state.slots.history,
                 freeSpins: state.slots.freeSpins,
                 lastPaidBet: state.slots.lastPaidBet
+            },
+            mines: {
+                games: state.mines.games,
+                history: state.mines.history
             },
             savedAt: Date.now()
         };
@@ -711,6 +736,153 @@ function publicSlotsState() {
     };
 }
 
+
+function combination(n, k) {
+    if (k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+
+    k = Math.min(k, n - k);
+
+    let result = 1;
+
+    for (let i = 1; i <= k; i++) {
+        result =
+            (result * (n - k + i)) /
+            i;
+    }
+
+    return result;
+}
+
+function getMinesMultiplier(mineCount, safeReveals) {
+    if (safeReveals <= 0) return 1;
+
+    const totalWays =
+        combination(MINES_BOARD_SIZE, safeReveals);
+
+    const safeWays =
+        combination(
+            MINES_BOARD_SIZE - mineCount,
+            safeReveals
+        );
+
+    if (!safeWays) return 0;
+
+    const fairMultiplier =
+        totalWays / safeWays;
+
+    return Math.max(
+        1.01,
+        Math.floor(
+            fairMultiplier *
+            MINES_HOUSE_FACTOR *
+            100
+        ) / 100
+    );
+}
+
+function createMinePositions(mineCount) {
+    const cells = Array.from(
+        { length: MINES_BOARD_SIZE },
+        (_, index) => index
+    );
+
+    for (let i = cells.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [cells[i], cells[j]] =
+            [cells[j], cells[i]];
+    }
+
+    return cells.slice(0, mineCount);
+}
+
+function publicMineGame(game) {
+    if (!game) return null;
+
+    return {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        mineCount: game.mineCount,
+        revealed: [...game.revealed],
+        safeReveals: game.safeReveals,
+        multiplier: getMinesMultiplier(
+            game.mineCount,
+            game.safeReveals
+        ),
+        potentialPayout: Math.floor(
+            game.betAmount *
+            getMinesMultiplier(
+                game.mineCount,
+                game.safeReveals
+            )
+        ),
+        status: game.status,
+        createdAt: game.createdAt
+    };
+}
+
+function publicMinesState() {
+    const games = {};
+
+    for (const [playerId, game] of Object.entries(
+        state.mines.games
+    )) {
+        games[playerId] = publicMineGame(game);
+    }
+
+    return {
+        boardSize: MINES_BOARD_SIZE,
+        minimumMines: MINES_MIN_COUNT,
+        maximumMines: MINES_MAX_COUNT,
+        games,
+        history: state.mines.history
+            .slice(0, 50)
+            .map(entry => ({ ...entry }))
+    };
+}
+
+function finishMineGame(game, result, payout, hitCell = null) {
+    const historyEntry = {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        mineCount: game.mineCount,
+        safeReveals: game.safeReveals,
+        multiplier:
+            result === "cashout" ||
+            result === "cleared"
+                ? getMinesMultiplier(
+                    game.mineCount,
+                    game.safeReveals
+                )
+                : 0,
+        payout,
+        profit: payout - game.betAmount,
+        result,
+        hitCell,
+        minePositions:
+            result === "mine"
+                ? [...game.minePositions]
+                : undefined,
+        createdAt: Date.now()
+    };
+
+    state.mines.history.unshift(historyEntry);
+    state.mines.history =
+        state.mines.history.slice(
+            0,
+            MINES_MAX_HISTORY
+        );
+
+    delete state.mines.games[game.playerId];
+    queueChipSave();
+
+    return historyEntry;
+}
+
 function pickMultiplier() {
     const total = wheel.reduce((sum, item) => sum + item.weight, 0);
     let roll = crypto.randomInt(1, total + 1);
@@ -960,6 +1132,7 @@ function publicState() {
     return {
         chips: publicChipState(),
         slots: publicSlotsState(),
+        mines: publicMinesState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -1658,6 +1831,276 @@ app.post("/slots/spin", (req, res) => {
     res.json({
         ok: true,
         result,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+
+// Mines routes
+
+app.post("/mines/start", (req, res) => {
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
+
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+
+    const betAmount = cleanAmount(
+        req.body?.amount
+    );
+
+    const mineCount = Math.floor(
+        Number(req.body?.mineCount || 0)
+    );
+
+    if (!playerId || !playerName || !betAmount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid Mines bet"
+        });
+    }
+
+    if (
+        !Number.isInteger(mineCount) ||
+        mineCount < MINES_MIN_COUNT ||
+        mineCount > MINES_MAX_COUNT
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                `Choose between ${MINES_MIN_COUNT} and ` +
+                `${MINES_MAX_COUNT} mines`
+        });
+    }
+
+    if (state.mines.games[playerId]) {
+        return res.status(409).json({
+            ok: false,
+            error:
+                "Finish or cash out your current Mines game first"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const debit = debitChips(
+        playerId,
+        betAmount,
+        {
+            playerName,
+            type: "bet",
+            gameType: "mines",
+            note: `Mines game with ${mineCount} mines`
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    const game = {
+        gameId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        betAmount,
+        mineCount,
+        minePositions:
+            createMinePositions(mineCount),
+        revealed: [],
+        safeReveals: 0,
+        status: "playing",
+        createdAt: Date.now()
+    };
+
+    state.mines.games[playerId] = game;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        game: publicMineGame(game),
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/mines/reveal", (req, res) => {
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
+
+    const cell = Math.floor(
+        Number(req.body?.cell)
+    );
+
+    const game = state.mines.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({
+            ok: false,
+            error: "No active Mines game"
+        });
+    }
+
+    if (
+        !Number.isInteger(cell) ||
+        cell < 0 ||
+        cell >= MINES_BOARD_SIZE
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid Mines tile"
+        });
+    }
+
+    if (game.revealed.includes(cell)) {
+        return res.status(400).json({
+            ok: false,
+            error: "Tile already revealed"
+        });
+    }
+
+    if (game.minePositions.includes(cell)) {
+        const history = finishMineGame(
+            game,
+            "mine",
+            0,
+            cell
+        );
+
+        return res.json({
+            ok: true,
+            hitMine: true,
+            minePositions: [
+                ...game.minePositions
+            ],
+            history,
+            balance:
+                getChipBalance(playerId),
+            state: publicState()
+        });
+    }
+
+    game.revealed.push(cell);
+    game.safeReveals += 1;
+
+    const safeCells =
+        MINES_BOARD_SIZE - game.mineCount;
+
+    if (game.safeReveals >= safeCells) {
+        const multiplier =
+            getMinesMultiplier(
+                game.mineCount,
+                game.safeReveals
+            );
+
+        const payout = Math.floor(
+            game.betAmount * multiplier
+        );
+
+        creditChips(
+            playerId,
+            payout,
+            {
+                playerName: game.playerName,
+                type: "payout",
+                gameType: "mines",
+                note: "Cleared every safe Mines tile"
+            }
+        );
+
+        const history = finishMineGame(
+            game,
+            "cleared",
+            payout
+        );
+
+        return res.json({
+            ok: true,
+            hitMine: false,
+            cleared: true,
+            revealedCell: cell,
+            history,
+            balance:
+                getChipBalance(playerId),
+            state: publicState()
+        });
+    }
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        hitMine: false,
+        cleared: false,
+        revealedCell: cell,
+        game: publicMineGame(game),
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/mines/cashout", (req, res) => {
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
+
+    const game = state.mines.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({
+            ok: false,
+            error: "No active Mines game"
+        });
+    }
+
+    if (game.safeReveals < 1) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                "Reveal at least one safe tile before cashing out"
+        });
+    }
+
+    const multiplier =
+        getMinesMultiplier(
+            game.mineCount,
+            game.safeReveals
+        );
+
+    const payout = Math.floor(
+        game.betAmount * multiplier
+    );
+
+    creditChips(
+        playerId,
+        payout,
+        {
+            playerName: game.playerName,
+            type: "payout",
+            gameType: "mines",
+            note:
+                `Mines cash-out at x${multiplier.toFixed(2)}`
+        }
+    );
+
+    const history = finishMineGame(
+        game,
+        "cashout",
+        payout
+    );
+
+    res.json({
+        ok: true,
+        payout,
+        multiplier,
+        minePositions: [
+            ...game.minePositions
+        ],
+        history,
         balance: getChipBalance(playerId),
         state: publicState()
     });
