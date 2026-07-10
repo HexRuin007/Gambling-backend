@@ -270,7 +270,7 @@ function recordHouseMovement({
     movement,
     gameType = ""
 }) {
-    const value = Math.floor(Number(amount || 0));
+    const value = parseChipAmount(amount);
 
     if (
         !Number.isSafeInteger(value) ||
@@ -328,8 +328,47 @@ function cleanPlayerName(value) {
     return String(value || "Player").trim().slice(0, 60);
 }
 
+function parseChipAmount(value) {
+    if (value == null) return 0;
+
+    const text = String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/,/g, "");
+
+    const match = text.match(
+        /^([0-9]+(?:\.[0-9]+)?)\s*([kmbtq]?)$/
+    );
+
+    if (!match) {
+        return 0;
+    }
+
+    const multipliers = {
+        "": 1,
+        k: 1e3,
+        m: 1e6,
+        b: 1e9,
+        t: 1e12,
+        q: 1e15
+    };
+
+    const amount =
+        Number(match[1]) *
+        multipliers[match[2]];
+
+    if (
+        !Number.isFinite(amount) ||
+        amount < 1
+    ) {
+        return 0;
+    }
+
+    return Math.floor(amount);
+}
+
 function cleanAmount(value) {
-    const amount = Math.floor(Number(value || 0));
+    const amount = parseChipAmount(value);
 
     if (
         !Number.isSafeInteger(amount) ||
@@ -562,8 +601,8 @@ function replaceReservedBet(
     playerName,
     gameType
 ) {
-    const oldAmount = Math.floor(
-        Number(existing?.amount || 0)
+    const oldAmount = parseChipAmount(
+        existing?.amount
     );
 
     const difference = newAmount - oldAmount;
@@ -611,7 +650,7 @@ function refundBets(bets, gameType, note) {
     for (const bet of bets || []) {
         creditChips(
             bet.playerId,
-            Number(bet.amount || 0),
+            parseChipAmount(bet.amount),
             {
                 playerName: bet.playerName,
                 type: "bet-refund",
