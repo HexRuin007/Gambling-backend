@@ -79,8 +79,8 @@ racing: {
         { id: "Pxpe", name: "Pxpe Express" },
         { id: "Crack", name: "WhipCrack" },
         { id: "rocket", name: "Sandy Rocket" },
-        { id: "storm", name: "Vespucci Storm" },
-        { id: "bullet", name: "LS Bullet" }
+        { id: "nipple", name: "Zitze Nipple" },
+        { id: "famil", name: "Uncle Famil" }
     ],
     bets: [],
     history: [],
