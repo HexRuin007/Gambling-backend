@@ -1432,6 +1432,10 @@ app.post("/slots/spin", (req, res) => {
     }
 
     const grid = createSlotGrid();
+    console.log(
+    "Scatter count:",
+    grid.flat().filter(x => x === "scatter").length
+);
     const evaluation = evaluateSlotGrid(grid, betAmount, isFreeSpin);
 
     if (evaluation.freeSpinsAwarded > 0) {
