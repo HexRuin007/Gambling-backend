@@ -495,6 +495,133 @@ function createSlotGrid() {
     );
 }
 
+function pickSlotNonScatterSymbol() {
+    let symbol = pickSlotSymbol();
+
+    while (symbol === "scatter") {
+        symbol = pickSlotSymbol();
+    }
+
+    return symbol;
+}
+
+function findScatterCells(grid) {
+    const cells = [];
+
+    for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 5; col++) {
+            if (grid[row][col] === "scatter") {
+                cells.push({ row, col });
+            }
+        }
+    }
+
+    return cells;
+}
+
+function canStartScatterNudge(grid) {
+    const scatters = findScatterCells(grid);
+
+    return (
+        scatters.length === 2 &&
+        scatters[0].col !== scatters[1].col &&
+        scatters.every(cell => cell.row < 2)
+    );
+}
+
+function createScatterNudgeStep(previousGrid, lockedScatters) {
+    const nextGrid = previousGrid.map(row => [...row]);
+    const lockedColumns = new Set(
+        lockedScatters.map(cell => cell.col)
+    );
+
+    // Only unlocked reels spin again.
+    for (let col = 0; col < 5; col++) {
+        if (lockedColumns.has(col)) continue;
+
+        for (let row = 0; row < 3; row++) {
+            nextGrid[row][col] = pickSlotSymbol();
+        }
+    }
+
+    const movedScatters = lockedScatters.map(cell => {
+        const nextRow = Math.min(2, cell.row + 1);
+
+        if (nextRow !== cell.row) {
+            nextGrid[cell.row][cell.col] =
+                pickSlotNonScatterSymbol();
+
+            nextGrid[nextRow][cell.col] =
+                "scatter";
+        }
+
+        return {
+            row: nextRow,
+            col: cell.col
+        };
+    });
+
+    return {
+        grid: nextGrid,
+        lockedScatters: movedScatters
+    };
+}
+
+function runScatterNudgeFeature(initialGrid) {
+    if (!canStartScatterNudge(initialGrid)) {
+        return {
+            triggered: false,
+            finalGrid: initialGrid,
+            steps: []
+        };
+    }
+
+    let currentGrid = initialGrid.map(row => [...row]);
+    let lockedScatters = findScatterCells(currentGrid);
+    const steps = [];
+
+    // A scatter can move at most twice: top -> middle -> bottom.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        if (!lockedScatters.some(cell => cell.row < 2)) {
+            break;
+        }
+
+        const step = createScatterNudgeStep(
+            currentGrid,
+            lockedScatters
+        );
+
+        currentGrid = step.grid;
+        lockedScatters = step.lockedScatters;
+
+        const scatterCount =
+            findScatterCells(currentGrid).length;
+
+        steps.push({
+            attempt,
+            grid: currentGrid.map(row => [...row]),
+            lockedColumns: lockedScatters.map(
+                cell => cell.col
+            ),
+            lockedScatters: lockedScatters.map(
+                cell => ({ ...cell })
+            ),
+            scatterCount,
+            success: scatterCount >= 3
+        });
+
+        if (scatterCount >= 3) {
+            break;
+        }
+    }
+
+    return {
+        triggered: true,
+        finalGrid: currentGrid,
+        steps
+    };
+}
+
 function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
     let payout = 0;
     const lineWins = [];
@@ -1431,12 +1558,14 @@ app.post("/slots/spin", (req, res) => {
         state.slots.lastPaidBet[playerId] = betAmount;
     }
 
-    const grid = createSlotGrid();
-    console.log(
-    "Scatter count:",
-    grid.flat().filter(x => x === "scatter").length
-);
-    const evaluation = evaluateSlotGrid(grid, betAmount, isFreeSpin);
+    const initialGrid = createSlotGrid();
+    const nudgeFeature = runScatterNudgeFeature(initialGrid);
+    const grid = nudgeFeature.finalGrid;
+    const evaluation = evaluateSlotGrid(
+        grid,
+        betAmount,
+        isFreeSpin
+    );
 
     if (evaluation.freeSpinsAwarded > 0) {
         state.slots.freeSpins[playerId] =
@@ -1456,7 +1585,11 @@ app.post("/slots/spin", (req, res) => {
         spinId: crypto.randomBytes(8).toString("hex"),
         playerId,
         playerName,
+        initialGrid,
         grid,
+        scatterNudgeTriggered: nudgeFeature.triggered,
+        scatterNudgeSteps: nudgeFeature.steps,
+        scatterNudgeAttempts: nudgeFeature.steps.length,
         betAmount,
         payout: evaluation.payout,
         profit: evaluation.payout - (isFreeSpin ? 0 : betAmount),
@@ -1468,12 +1601,16 @@ app.post("/slots/spin", (req, res) => {
         lineWins: evaluation.lineWins,
         winningCells: evaluation.winningCells,
         message: evaluation.freeSpinsAwarded > 0
-            ? `${evaluation.scatterCount} scatters awarded ${evaluation.freeSpinsAwarded} free spins!`
-            : evaluation.bonusMultiplier > 1
-                ? `Free-spin bonus multiplier x${evaluation.bonusMultiplier}`
-                : evaluation.lineWins.length
-                    ? `${evaluation.lineWins.length} winning payline${evaluation.lineWins.length === 1 ? "" : "s"}`
-                    : "No winning combination",
+            ? nudgeFeature.triggered
+                ? `Scatter nudge found the third scatter and awarded ${evaluation.freeSpinsAwarded} free spins!`
+                : `${evaluation.scatterCount} scatters awarded ${evaluation.freeSpinsAwarded} free spins!`
+            : nudgeFeature.triggered
+                ? `Scatter nudge used ${nudgeFeature.steps.length} free respin${nudgeFeature.steps.length === 1 ? "" : "s"}, but no third scatter landed`
+                : evaluation.bonusMultiplier > 1
+                    ? `Free-spin bonus multiplier x${evaluation.bonusMultiplier}`
+                    : evaluation.lineWins.length
+                        ? `${evaluation.lineWins.length} winning payline${evaluation.lineWins.length === 1 ? "" : "s"}`
+                        : "No winning combination",
         createdAt: Date.now()
     };
 
