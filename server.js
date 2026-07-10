@@ -52,11 +52,12 @@ const wheel = [
 
 const state = {
     chips: {
-    balances: {},
-    playerNames: {},
-    requests: [],
-    transactions: []
-},
+        balances: {},
+        playerNames: {},
+        requests: [],
+        transactions: [],
+        dailyHouseStats: {}
+    },
     slots: {
         history: [],
         freeSpins: {},
@@ -145,6 +146,14 @@ function loadChipData() {
                 saved.transactions.slice(0, 200);
         }
 
+        if (
+            saved.dailyHouseStats &&
+            typeof saved.dailyHouseStats === "object"
+        ) {
+            state.chips.dailyHouseStats =
+                saved.dailyHouseStats;
+        }
+
         if (saved.slots && typeof saved.slots === "object") {
             if (Array.isArray(saved.slots.history)) {
                 state.slots.history = saved.slots.history.slice(0, SLOT_MAX_HISTORY);
@@ -195,6 +204,7 @@ function saveChipDataImmediately() {
             playerNames: state.chips.playerNames,
             requests: state.chips.requests,
             transactions: state.chips.transactions,
+            dailyHouseStats: state.chips.dailyHouseStats,
             slots: {
                 history: state.slots.history,
                 freeSpins: state.slots.freeSpins,
@@ -234,6 +244,80 @@ function queueChipSave() {
         chipSaveTimer = null;
         saveChipDataImmediately();
     }, 100);
+}
+
+function getUtcDateKey(timestamp = Date.now()) {
+    return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function getOrCreateDailyHouseStats(dateKey = getUtcDateKey()) {
+    if (!state.chips.dailyHouseStats[dateKey]) {
+        state.chips.dailyHouseStats[dateKey] = {
+            date: dateKey,
+            bets: 0,
+            payouts: 0,
+            refunds: 0,
+            profit: 0,
+            games: {}
+        };
+    }
+
+    return state.chips.dailyHouseStats[dateKey];
+}
+
+function recordHouseMovement({
+    amount,
+    movement,
+    gameType = ""
+}) {
+    const value = Math.floor(Number(amount || 0));
+
+    if (
+        !Number.isSafeInteger(value) ||
+        value <= 0 ||
+        !gameType
+    ) {
+        return;
+    }
+
+    const stats = getOrCreateDailyHouseStats();
+    const game = stats.games[gameType] || {
+        bets: 0,
+        payouts: 0,
+        refunds: 0,
+        profit: 0
+    };
+
+    if (movement === "bet") {
+        stats.bets += value;
+        stats.profit += value;
+        game.bets += value;
+        game.profit += value;
+    } else if (movement === "payout") {
+        stats.payouts += value;
+        stats.profit -= value;
+        game.payouts += value;
+        game.profit -= value;
+    } else if (movement === "refund") {
+        stats.refunds += value;
+        stats.profit -= value;
+        game.refunds += value;
+        game.profit -= value;
+    } else {
+        return;
+    }
+
+    stats.games[gameType] = game;
+
+    // Keep roughly one year of daily records.
+    const keys = Object.keys(
+        state.chips.dailyHouseStats
+    ).sort();
+
+    while (keys.length > 370) {
+        const oldest = keys.shift();
+        delete state.chips.dailyHouseStats[oldest];
+    }
 }
 
 function cleanPlayerId(value) {
@@ -389,6 +473,26 @@ function creditChips(playerId, amount, options = {}) {
             gameType: options.gameType || "",
             note: options.note || ""
         });
+
+        if (
+            options.type === "payout" &&
+            options.gameType
+        ) {
+            recordHouseMovement({
+                amount: value,
+                movement: "payout",
+                gameType: options.gameType
+            });
+        } else if (
+            options.type === "bet-refund" &&
+            options.gameType
+        ) {
+            recordHouseMovement({
+                amount: value,
+                movement: "refund",
+                gameType: options.gameType
+            });
+        }
     }
 
     queueChipSave();
@@ -428,6 +532,20 @@ function debitChips(playerId, amount, options = {}) {
         gameType: options.gameType || "",
         note: options.note || ""
     });
+
+    if (
+        (
+            options.type === "bet" ||
+            options.type === "bet-adjustment"
+        ) &&
+        options.gameType
+    ) {
+        recordHouseMovement({
+            amount: value,
+            movement: "bet",
+            gameType: options.gameType
+        });
+    }
 
     queueChipSave();
 
@@ -1504,6 +1622,37 @@ app.post("/admin-login", (req, res) => {
 });
 
 // Chip routes
+
+app.get("/chips/daily-profit", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const requestedDate = String(
+        req.query?.date || getUtcDateKey()
+    ).trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+        return res.status(400).json({
+            ok: false,
+            error: "Date must use YYYY-MM-DD"
+        });
+    }
+
+    const stats =
+        state.chips.dailyHouseStats[requestedDate] || {
+            date: requestedDate,
+            bets: 0,
+            payouts: 0,
+            refunds: 0,
+            profit: 0,
+            games: {}
+        };
+
+    res.json({
+        ok: true,
+        timezone: "UTC",
+        stats
+    });
+});
 
 app.post("/chips/request", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
