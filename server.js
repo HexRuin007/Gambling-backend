@@ -5,7 +5,8 @@ import crypto from "crypto";
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
 const SPIN_DURATION_MS = 4300;
-
+const RACE_DURATION_MS = 6500;
+const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin"] }));
 app.use(express.json({ limit: "2mb" }));
@@ -31,6 +32,12 @@ const wheel = [
 ];
 
 const state = {
+    chips: {
+    balances: {},
+    playerNames: {},
+    requests: [],
+    transactions: []
+},
     wheel: {
         bets: [],
         history: [],
@@ -60,6 +67,253 @@ const state = {
         racing: false,
         activeRace: null
     }
+    function cleanPlayerId(value) {
+    return String(value || "").trim().slice(0, 80);
+}
+
+function cleanPlayerName(value) {
+    return String(value || "Player").trim().slice(0, 60);
+}
+
+function cleanAmount(value) {
+    const amount = Math.floor(Number(value || 0));
+
+    if (
+        !Number.isSafeInteger(amount) ||
+        amount < 1 ||
+        amount > MAX_CHIP_AMOUNT
+    ) {
+        return 0;
+    }
+
+    return amount;
+}
+
+function rememberPlayer(playerId, playerName) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return;
+
+    if (playerName) {
+        state.chips.playerNames[id] = cleanPlayerName(playerName);
+    }
+
+    if (
+        !Object.prototype.hasOwnProperty.call(
+            state.chips.balances,
+            id
+        )
+    ) {
+        state.chips.balances[id] = 0;
+    }
+}
+
+function getChipBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return 0;
+
+    rememberPlayer(id);
+
+    return Math.max(
+        0,
+        Math.floor(Number(state.chips.balances[id] || 0))
+    );
+}
+
+function addChipTransaction({
+    playerId,
+    playerName,
+    amount,
+    type,
+    gameType = "",
+    note = ""
+}) {
+    const transaction = {
+        transactionId: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName:
+            playerName ||
+            state.chips.playerNames[playerId] ||
+            "Player",
+        amount,
+        type,
+        gameType,
+        note,
+        balanceAfter: getChipBalance(playerId),
+        createdAt: Date.now()
+    };
+
+    state.chips.transactions.unshift(transaction);
+    state.chips.transactions =
+        state.chips.transactions.slice(0, 200);
+
+    return transaction;
+}
+
+function creditChips(playerId, amount, options = {}) {
+    const id = cleanPlayerId(playerId);
+    const value = Math.floor(Number(amount || 0));
+
+    if (
+        !id ||
+        !Number.isSafeInteger(value) ||
+        value < 0
+    ) {
+        return false;
+    }
+
+    rememberPlayer(id, options.playerName);
+
+    const current = getChipBalance(id);
+    const next = current + value;
+
+    if (
+        !Number.isSafeInteger(next) ||
+        next > MAX_CHIP_AMOUNT
+    ) {
+        return false;
+    }
+
+    state.chips.balances[id] = next;
+
+    if (value > 0) {
+        addChipTransaction({
+            playerId: id,
+            playerName: options.playerName,
+            amount: value,
+            type: options.type || "credit",
+            gameType: options.gameType || "",
+            note: options.note || ""
+        });
+    }
+
+    return true;
+}
+
+function debitChips(playerId, amount, options = {}) {
+    const id = cleanPlayerId(playerId);
+    const value = cleanAmount(amount);
+
+    if (!id || !value) {
+        return {
+            ok: false,
+            error: "Invalid chip amount"
+        };
+    }
+
+    rememberPlayer(id, options.playerName);
+
+    const balance = getChipBalance(id);
+
+    if (balance < value) {
+        return {
+            ok: false,
+            error: `Not enough chips. Balance: ${balance}`
+        };
+    }
+
+    state.chips.balances[id] = balance - value;
+
+    addChipTransaction({
+        playerId: id,
+        playerName: options.playerName,
+        amount: -value,
+        type: options.type || "bet",
+        gameType: options.gameType || "",
+        note: options.note || ""
+    });
+
+    return {
+        ok: true,
+        balance: state.chips.balances[id]
+    };
+}
+
+function replaceReservedBet(
+    existing,
+    newAmount,
+    playerId,
+    playerName,
+    gameType
+) {
+    const oldAmount = Math.floor(
+        Number(existing?.amount || 0)
+    );
+
+    const difference = newAmount - oldAmount;
+
+    if (difference > 0) {
+        return debitChips(
+            playerId,
+            difference,
+            {
+                playerName,
+                type: "bet-adjustment",
+                gameType,
+                note: `Increased ${gameType} bet`
+            }
+        );
+    }
+
+    if (difference < 0) {
+        const refunded = creditChips(
+            playerId,
+            Math.abs(difference),
+            {
+                playerName,
+                type: "bet-refund",
+                gameType,
+                note: `Reduced ${gameType} bet`
+            }
+        );
+
+        if (!refunded) {
+            return {
+                ok: false,
+                error: "Could not refund chip difference"
+            };
+        }
+    }
+
+    return {
+        ok: true,
+        balance: getChipBalance(playerId)
+    };
+}
+
+function refundBets(bets, gameType, note) {
+    for (const bet of bets || []) {
+        creditChips(
+            bet.playerId,
+            Number(bet.amount || 0),
+            {
+                playerName: bet.playerName,
+                type: "bet-refund",
+                gameType,
+                note
+            }
+        );
+    }
+}
+
+function publicChipState() {
+    return {
+        balances: {
+            ...state.chips.balances
+        },
+
+        playerNames: {
+            ...state.chips.playerNames
+        },
+
+        requests: state.chips.requests.map(
+            request => ({ ...request })
+        ),
+
+        transactions: state.chips.transactions
+            .slice(0, 50)
+            .map(transaction => ({ ...transaction }))
+    };
+}
 };
 
 function pickMultiplier() {
@@ -165,6 +419,7 @@ function moveToNextBlackjackTurn() {
 
 function finishBlackjackRound() {
     const bj = state.blackjack;
+    if (bj.status !== "playing") return;
 
     bj.status = "finished";
     bj.currentTurnIndex = -1;
@@ -198,6 +453,21 @@ function finishBlackjackRound() {
         player.status = result;
         player.payout = payout;
         player.profit = payout - player.amount;
+        if (payout > 0) {
+    creditChips(
+        player.playerId,
+        payout,
+        {
+            playerName: player.playerName,
+            type: "payout",
+            gameType: "blackjack",
+            note:
+                result === "push"
+                    ? "Blackjack bet returned"
+                    : "Blackjack winnings"
+        }
+    );
+}
     });
 
     bj.history.unshift({
@@ -260,6 +530,20 @@ function finishHorseRace(raceId) {
     const race = state.racing;
     const active = race.activeRace;
     if (!active || active.raceId !== raceId) return;
+    for (const result of active.results || []) {
+    if (result.payout > 0) {
+        creditChips(
+            result.playerId,
+            result.payout,
+            {
+                playerName: result.playerName,
+                type: "payout",
+                gameType: "racing",
+                note: `Horse racing winnings on ${result.horseName}`
+            }
+        );
+    }
+}
 
     race.history.unshift({
         raceId,
@@ -276,6 +560,7 @@ function finishHorseRace(raceId) {
 }
 function publicState() {
     return {
+        chips: publicChipState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -284,11 +569,39 @@ function publicState() {
 
 function finishWheelSpin(spinId) {
     const active = state.wheel.activeSpin;
-    if (!active || active.spinId !== spinId) return;
 
-    const results = active.results.map(r => ({ ...r }));
-    state.wheel.history.unshift({ spinId, results, createdAt: Date.now() });
-    state.wheel.history = state.wheel.history.slice(0, 50);
+    if (!active || active.spinId !== spinId) {
+        return;
+    }
+
+    const results = active.results.map(
+        result => ({ ...result })
+    );
+
+    for (const result of results) {
+        if (result.payout > 0) {
+            creditChips(
+                result.playerId,
+                result.payout,
+                {
+                    playerName: result.playerName,
+                    type: "payout",
+                    gameType: "wheel",
+                    note: `Wheel result x${result.multiplier}`
+                }
+            );
+        }
+    }
+
+    state.wheel.history.unshift({
+        spinId,
+        results,
+        createdAt: Date.now()
+    });
+
+    state.wheel.history =
+        state.wheel.history.slice(0, 50);
+
     state.wheel.bets = [];
     state.wheel.spinning = false;
     state.wheel.activeSpin = null;
@@ -311,27 +624,297 @@ app.post("/admin-login", (req, res) => {
     res.json({ ok: true, token });
 });
 
+// Chip routes
+
+app.post("/chips/request", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+    const amount = cleanAmount(req.body?.amount);
+
+    if (!playerId || !playerName || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid chip request"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const existing = state.chips.requests.find(
+        request =>
+            request.playerId === playerId &&
+            request.status === "pending"
+    );
+
+    if (existing) {
+        existing.playerName = playerName;
+        existing.amount = amount;
+        existing.updatedAt = Date.now();
+
+        return res.json({
+            ok: true,
+            request: existing,
+            state: publicState()
+        });
+    }
+
+    const request = {
+        requestId: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        amount,
+        status: "pending",
+        createdAt: Date.now()
+    };
+
+    state.chips.requests.push(request);
+
+    res.json({
+        ok: true,
+        request,
+        state: publicState()
+    });
+});
+
+app.post("/chips/grant", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const requestId = String(
+        req.body?.requestId || ""
+    ).trim();
+
+    let playerId = cleanPlayerId(req.body?.playerId);
+    let playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+    let amount = cleanAmount(req.body?.amount);
+
+    let request = null;
+
+    if (requestId) {
+        request = state.chips.requests.find(
+            item =>
+                item.requestId === requestId &&
+                item.status === "pending"
+        );
+
+        if (!request) {
+            return res.status(404).json({
+                ok: false,
+                error: "Chip request not found"
+            });
+        }
+
+        playerId = request.playerId;
+        playerName = request.playerName;
+        amount = request.amount;
+    }
+
+    if (!playerId || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid player or chip amount"
+        });
+    }
+
+    const granted = creditChips(
+        playerId,
+        amount,
+        {
+            playerName,
+            type: "banker-grant",
+            note: request
+                ? "Chip purchase request approved"
+                : "Chips manually granted by banker"
+        }
+    );
+
+    if (!granted) {
+        return res.status(400).json({
+            ok: false,
+            error: "Could not grant chips"
+        });
+    }
+
+    if (request) {
+        state.chips.requests =
+            state.chips.requests.filter(
+                item => item.requestId !== request.requestId
+            );
+    }
+
+    res.json({
+        ok: true,
+        playerId,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/chips/reject", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const requestId = String(
+        req.body?.requestId || ""
+    ).trim();
+
+    const request = state.chips.requests.find(
+        item =>
+            item.requestId === requestId &&
+            item.status === "pending"
+    );
+
+    if (!request) {
+        return res.status(404).json({
+            ok: false,
+            error: "Chip request not found"
+        });
+    }
+
+    state.chips.requests =
+        state.chips.requests.filter(
+            item => item.requestId !== requestId
+        );
+
+    res.json({
+        ok: true,
+        state: publicState()
+    });
+});
+
+app.post("/chips/set-balance", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+
+    const balance = Math.floor(
+        Number(req.body?.balance)
+    );
+
+    if (
+        !playerId ||
+        !Number.isSafeInteger(balance) ||
+        balance < 0 ||
+        balance > MAX_CHIP_AMOUNT
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid balance"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const previousBalance = getChipBalance(playerId);
+    state.chips.balances[playerId] = balance;
+
+    addChipTransaction({
+        playerId,
+        playerName,
+        amount: balance - previousBalance,
+        type: "balance-set",
+        note: "Balance manually set by banker"
+    });
+
+    res.json({
+        ok: true,
+        playerId,
+        balance,
+        state: publicState()
+    });
+});
 // Wheel routes
 app.post("/place-bet", (req, res) => {
-    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+    if (state.wheel.spinning) {
+        return res.status(409).json({
+            ok: false,
+            error: "Spin already running"
+        });
+    }
 
-    const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
-    const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
-    const amount = Math.floor(Number(req.body?.amount || 0));
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
 
-    if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid bet" });
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
 
-    const existing = state.wheel.bets.find(b => b.playerId === playerId);
+    const amount = cleanAmount(
+        req.body?.amount
+    );
+
+    if (!playerId || !playerName || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid bet"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const existing = state.wheel.bets.find(
+        bet => bet.playerId === playerId
+    );
+
     if (existing) {
+        const reserved = replaceReservedBet(
+            existing,
+            amount,
+            playerId,
+            playerName,
+            "wheel"
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
         existing.playerName = playerName;
         existing.amount = amount;
         existing.confirmed = false;
         existing.updatedAt = Date.now();
     } else {
-        state.wheel.bets.push({ playerId, playerName, amount, confirmed: false, createdAt: Date.now() });
+        const reserved = debitChips(
+            playerId,
+            amount,
+            {
+                playerName,
+                type: "bet",
+                gameType: "wheel",
+                note: "Wheel bet placed"
+            }
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
+        state.wheel.bets.push({
+            playerId,
+            playerName,
+            amount,
+            confirmed: false,
+            createdAt: Date.now()
+        });
     }
 
-    res.json({ ok: true, state: publicState() });
+    res.json({
+        ok: true,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
 });
 
 app.post("/confirm-all", (req, res) => {
@@ -344,17 +927,33 @@ app.post("/confirm-all", (req, res) => {
 
 app.post("/clear-round", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Spin already running" });
+
+    if (state.wheel.spinning) {
+        return res.status(409).json({
+            ok: false,
+            error: "Spin already running"
+        });
+    }
+
+    refundBets(
+        state.wheel.bets,
+        "wheel",
+        "Wheel bets cleared by banker"
+    );
 
     state.wheel.bets = [];
-    res.json({ ok: true, state: publicState() });
+
+    res.json({
+        ok: true,
+        state: publicState()
+    });
 });
 
 app.post("/spin", (req, res) => {
     if (!requireAdmin(req, res)) return;
     if (state.wheel.spinning) return res.status(409).json({ ok: false, error: "Already spinning" });
     if (!state.wheel.bets.length) return res.status(400).json({ ok: false, error: "No bets" });
-    if (state.wheel.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm payments first" });
+    if (state.wheel.bets.some(b => !b.confirmed)) return res.status(400).json({ ok: false, error: "Confirm bets first" });
 
     const spinId = crypto.randomBytes(8).toString("hex");
     const startedAt = Date.now();
@@ -381,31 +980,100 @@ app.post("/spin", (req, res) => {
 // Blackjack routes
 app.post("/blackjack/place-bet", (req, res) => {
     const bj = state.blackjack;
-    if (bj.status === "playing") return res.status(409).json({ ok: false, error: "Blackjack round already running" });
 
-    const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
-    const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
-    const amount = Math.floor(Number(req.body?.amount || 0));
+    if (bj.status === "playing") {
+        return res.status(409).json({
+            ok: false,
+            error: "Blackjack round already running"
+        });
+    }
 
-    if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid blackjack bet" });
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
 
-    const existing = bj.bets.find(b => b.playerId === playerId);
-    if (existing) {
-        existing.playerName = playerName;
-        existing.amount = amount;
-        existing.confirmed = false;
-        existing.updatedAt = Date.now();
-    } else {
-        bj.bets.push({ playerId, playerName, amount, confirmed: false, createdAt: Date.now() });
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+
+    const amount = cleanAmount(
+        req.body?.amount
+    );
+
+    if (!playerId || !playerName || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid blackjack bet"
+        });
     }
 
     if (bj.status === "finished") {
         bj.players = [];
         bj.dealerHand = [];
+        bj.deck = [];
         bj.status = "waiting";
+        bj.currentTurnIndex = 0;
     }
 
-    res.json({ ok: true, state: publicState() });
+    rememberPlayer(playerId, playerName);
+
+    const existing = bj.bets.find(
+        bet => bet.playerId === playerId
+    );
+
+    if (existing) {
+        const reserved = replaceReservedBet(
+            existing,
+            amount,
+            playerId,
+            playerName,
+            "blackjack"
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
+        existing.playerName = playerName;
+        existing.amount = amount;
+        existing.confirmed = false;
+        existing.updatedAt = Date.now();
+    } else {
+        const reserved = debitChips(
+            playerId,
+            amount,
+            {
+                playerName,
+                type: "bet",
+                gameType: "blackjack",
+                note: "Blackjack bet placed"
+            }
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
+        bj.bets.push({
+            playerId,
+            playerName,
+            amount,
+            confirmed: false,
+            createdAt: Date.now()
+        });
+    }
+
+    res.json({
+        ok: true,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
 });
 
 app.post("/blackjack/confirm-all", (req, res) => {
@@ -482,6 +1150,19 @@ app.post("/blackjack/stand", (req, res) => {
 app.post("/blackjack/reset", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
+    if (state.blackjack.status === "playing") {
+        return res.status(409).json({
+            ok: false,
+            error: "Cannot reset a running blackjack round"
+        });
+    }
+
+    refundBets(
+        state.blackjack.bets,
+        "blackjack",
+        "Blackjack bets cleared by banker"
+    );
+
     state.blackjack.bets = [];
     state.blackjack.players = [];
     state.blackjack.dealerHand = [];
@@ -489,26 +1170,80 @@ app.post("/blackjack/reset", (req, res) => {
     state.blackjack.status = "waiting";
     state.blackjack.currentTurnIndex = 0;
 
-    res.json({ ok: true, state: publicState() });
+    res.json({
+        ok: true,
+        state: publicState()
+    });
 });
 
 
 // Horse racing routes
 app.post("/racing/place-bet", (req, res) => {
     const race = state.racing;
-    if (race.racing) return res.status(409).json({ ok: false, error: "Race already running" });
 
-    const playerId = String(req.body?.playerId || req.body?.playerName || crypto.randomBytes(4).toString("hex")).slice(0, 80);
-    const playerName = String(req.body?.playerName || "Player").trim().slice(0, 60);
-    const amount = Math.floor(Number(req.body?.amount || 0));
-    const horseId = String(req.body?.horseId || "");
-    const horse = race.horses.find(h => h.id === horseId);
+    if (race.racing) {
+        return res.status(409).json({
+            ok: false,
+            error: "Race already running"
+        });
+    }
 
-    if (!playerName || amount < 1) return res.status(400).json({ ok: false, error: "Invalid race bet" });
-    if (!horse) return res.status(400).json({ ok: false, error: "Choose a horse" });
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
 
-    const existing = race.bets.find(b => b.playerId === playerId);
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+
+    const amount = cleanAmount(
+        req.body?.amount
+    );
+
+    const horseId = String(
+        req.body?.horseId || ""
+    );
+
+    const horse = race.horses.find(
+        item => item.id === horseId
+    );
+
+    if (!playerId || !playerName || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid race bet"
+        });
+    }
+
+    if (!horse) {
+        return res.status(400).json({
+            ok: false,
+            error: "Choose a horse"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const existing = race.bets.find(
+        bet => bet.playerId === playerId
+    );
+
     if (existing) {
+        const reserved = replaceReservedBet(
+            existing,
+            amount,
+            playerId,
+            playerName,
+            "racing"
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
         existing.playerName = playerName;
         existing.amount = amount;
         existing.horseId = horse.id;
@@ -516,10 +1251,40 @@ app.post("/racing/place-bet", (req, res) => {
         existing.confirmed = false;
         existing.updatedAt = Date.now();
     } else {
-        race.bets.push({ playerId, playerName, amount, horseId: horse.id, horseName: horse.name, confirmed: false, createdAt: Date.now() });
+        const reserved = debitChips(
+            playerId,
+            amount,
+            {
+                playerName,
+                type: "bet",
+                gameType: "racing",
+                note: `Horse racing bet on ${horse.name}`
+            }
+        );
+
+        if (!reserved.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: reserved.error
+            });
+        }
+
+        race.bets.push({
+            playerId,
+            playerName,
+            amount,
+            horseId: horse.id,
+            horseName: horse.name,
+            confirmed: false,
+            createdAt: Date.now()
+        });
     }
 
-    res.json({ ok: true, state: publicState() });
+    res.json({
+        ok: true,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
 });
 
 app.post("/racing/confirm-all", (req, res) => {
@@ -532,12 +1297,27 @@ app.post("/racing/confirm-all", (req, res) => {
 
 app.post("/racing/clear", (req, res) => {
     if (!requireAdmin(req, res)) return;
-    if (state.racing.racing) return res.status(409).json({ ok: false, error: "Race already running" });
+
+    if (state.racing.racing) {
+        return res.status(409).json({
+            ok: false,
+            error: "Race already running"
+        });
+    }
+
+    refundBets(
+        state.racing.bets,
+        "racing",
+        "Race bets cleared by banker"
+    );
 
     state.racing.bets = [];
-    res.json({ ok: true, state: publicState() });
-});
 
+    res.json({
+        ok: true,
+        state: publicState()
+    });
+});
 app.post("/racing/start", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
@@ -571,14 +1351,17 @@ app.post("/racing/start", (req, res) => {
     race.activeRace = {
         raceId,
         startedAt: Date.now(),
-        durationMs: 6500,
+        durationMs: RACE_DURATION_MS,
         winnerHorseId: winner.id,
         winnerHorseName: winner.name,
         placements: shuffled.map((h, index) => ({ place: index + 1, id: h.id, name: h.name })),
         results
     };
 
-    setTimeout(() => finishHorseRace(raceId), race.activeRace.durationMs);
+    setTimeout(
+    () => finishHorseRace(raceId),
+    RACE_DURATION_MS
+);
     res.json({ ok: true, race: race.activeRace, state: publicState() });
 });
 
