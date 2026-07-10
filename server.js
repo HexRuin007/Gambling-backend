@@ -537,7 +537,7 @@ const SLOT_SYMBOLS = [
     { id: "wild", label: "🃏", weight: 5, pays: { 3: 20, 4: 100, 5: 500 } },
 
     // Scatter payouts use the full total bet rather than the per-line bet.
-    { id: "scatter", label: "⭐", weight: 5, pays: { 3: 3, 4: 12, 5: 50 } }
+    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 3, 4: 12, 5: 50 } }
 ];
 
 const SLOT_PAYLINES = [
