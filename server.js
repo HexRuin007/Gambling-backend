@@ -313,9 +313,9 @@ function publicChipState() {
         transactions: state.chips.transactions
             .slice(0, 50)
             .map(transaction => ({ ...transaction }))
-    };
-}
+    }
 };
+
 
 function pickMultiplier() {
     const total = wheel.reduce((sum, item) => sum + item.weight, 0);
