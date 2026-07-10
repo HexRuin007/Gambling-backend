@@ -753,6 +753,63 @@ app.post("/chips/grant", (req, res) => {
         state: publicState()
     });
 });
+app.post("/chips/cashout", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(
+        req.body?.playerName ||
+        state.chips.playerNames[playerId] ||
+        "Player"
+    );
+    const amount = cleanAmount(req.body?.amount);
+
+    if (!playerId || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid player ID or cash-out amount"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const currentBalance = getChipBalance(playerId);
+
+    if (currentBalance < amount) {
+        return res.status(400).json({
+            ok: false,
+            error: `Player only has ${currentBalance} chips`
+        });
+    }
+
+    const removed = debitChips(
+        playerId,
+        amount,
+        {
+            playerName,
+            type: "cashout",
+            gameType: "",
+            note: "Chips removed after cash out"
+        }
+    );
+
+    if (!removed.ok) {
+        return res.status(400).json({
+            ok: false,
+            error: removed.error
+        });
+    }
+
+    res.json({
+        ok: true,
+        playerId,
+        playerName,
+        amountRemoved: amount,
+        previousBalance: currentBalance,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
 
 app.post("/chips/reject", (req, res) => {
     if (!requireAdmin(req, res)) return;
