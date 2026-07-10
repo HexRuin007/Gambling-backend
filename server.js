@@ -1,6 +1,4 @@
-from pathlib import Path
-
-code = r'''import express from "express";
+import express from "express";
 import cors from "cors";
 import crypto from "crypto";
 
