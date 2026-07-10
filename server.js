@@ -807,6 +807,7 @@ function publicMineGame(game) {
         mineCount: game.mineCount,
         revealed: [...game.revealed],
         safeReveals: game.safeReveals,
+        revealed: [...game.revealed],
         multiplier: getMinesMultiplier(
             game.mineCount,
             game.safeReveals
@@ -2023,6 +2024,8 @@ app.post("/mines/reveal", (req, res) => {
             hitMine: false,
             cleared: true,
             revealedCell: cell,
+            revealed: [...game.revealed],
+            minePositions: [...game.minePositions],
             history,
             balance:
                 getChipBalance(playerId),
