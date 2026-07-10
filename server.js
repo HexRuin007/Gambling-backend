@@ -464,14 +464,18 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-    { id: "pear", label: "🍐", weight: 30, pays: { 3: 0.5, 4: 1.5, 5: 5 } },
-    { id: "cherry", label: "🍒", weight: 24, pays: { 3: 0.8, 4: 2.5, 5: 8 } },
-    { id: "bell", label: "🔔", weight: 18, pays: { 3: 1, 4: 4, 5: 12 } },
-    { id: "gem", label: "💎", weight: 12, pays: { 3: 1.5, 4: 6, 5: 20 } },
-    { id: "crown", label: "👑", weight: 8, pays: { 3: 2, 4: 10, 5: 40 } },
-    { id: "seven", label: "7️⃣", weight: 4, pays: { 3: 3, 4: 15, 5: 75 } },
-    { id: "wild", label: "🃏", weight: 3, pays: { 3: 4, 4: 20, 5: 100 } },
-    { id: "scatter", label: "⭐", weight: 3, pays: { 3: 2, 4: 8, 5: 30 } }
+    // More common matching symbols and much stronger line payouts.
+    // Payline wins still use 1/10th of the total bet per line.
+    { id: "pear", label: "🍐", weight: 34, pays: { 3: 4, 4: 12, 5: 40 } },
+    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 5, 4: 16, 5: 55 } },
+    { id: "bell", label: "🔔", weight: 22, pays: { 3: 6, 4: 22, 5: 75 } },
+    { id: "gem", label: "💎", weight: 16, pays: { 3: 8, 4: 30, 5: 110 } },
+    { id: "crown", label: "👑", weight: 11, pays: { 3: 10, 4: 45, 5: 180 } },
+    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 15, 4: 70, 5: 300 } },
+    { id: "wild", label: "🃏", weight: 5, pays: { 3: 20, 4: 100, 5: 500 } },
+
+    // Scatter payouts use the full total bet rather than the per-line bet.
+    { id: "scatter", label: "⭐", weight: 5, pays: { 3: 3, 4: 12, 5: 50 } }
 ];
 
 const SLOT_PAYLINES = [
@@ -656,14 +660,46 @@ function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
         freeSpinsAwarded = SLOT_FREE_SPINS_AWARD[count] || 0;
     }
 
+    // A paid spin that is shown as a winning payline should never return
+    // less than the original stake. This prevents "winning" while still
+    // losing chips overall.
+    let minimumWinApplied = false;
+
+    if (
+        !isFreeSpin &&
+        (lineWins.length > 0 || scatterCount >= 3) &&
+        payout < betAmount
+    ) {
+        payout = betAmount;
+        minimumWinApplied = true;
+    }
+
     let bonusMultiplier = 1;
+
     if (isFreeSpin && payout > 0) {
         const bonusRoll = crypto.randomInt(1, 101);
-        bonusMultiplier = bonusRoll <= 5 ? 10 : bonusRoll <= 20 ? 5 : bonusRoll <= 50 ? 3 : 2;
+
+        bonusMultiplier =
+            bonusRoll <= 8
+                ? 10
+                : bonusRoll <= 28
+                    ? 5
+                    : bonusRoll <= 60
+                        ? 3
+                        : 2;
+
         payout *= bonusMultiplier;
     }
 
-    return { payout: Math.floor(payout), lineWins, winningCells, scatterCount, freeSpinsAwarded, bonusMultiplier };
+    return {
+        payout: Math.floor(payout),
+        lineWins,
+        winningCells,
+        scatterCount,
+        freeSpinsAwarded,
+        bonusMultiplier,
+        minimumWinApplied
+    };
 }
 
 function publicSlotsState() {
@@ -1597,6 +1633,7 @@ app.post("/slots/spin", (req, res) => {
         freeSpinsAwarded: evaluation.freeSpinsAwarded,
         freeSpinsRemaining: state.slots.freeSpins[playerId] || 0,
         bonusMultiplier: evaluation.bonusMultiplier,
+        minimumWinApplied: evaluation.minimumWinApplied,
         scatterCount: evaluation.scatterCount,
         lineWins: evaluation.lineWins,
         winningCells: evaluation.winningCells,
