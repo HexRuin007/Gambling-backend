@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
@@ -8,6 +10,9 @@ const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
+const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
+const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
+let chipSaveTimer = null;
 const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin"] }));
 app.use(express.json({ limit: "2mb" }));
@@ -76,7 +81,110 @@ racing: {
     autoStartAt: null
 }
 };
-    function cleanPlayerId(value) {
+
+function loadChipData() {
+    try {
+        fs.mkdirSync(DATA_DIRECTORY, {
+            recursive: true
+        });
+
+        if (!fs.existsSync(CHIP_DATA_FILE)) {
+            console.log(
+                "No saved chip file found. Starting with empty balances."
+            );
+            return;
+        }
+
+        const raw = fs.readFileSync(
+            CHIP_DATA_FILE,
+            "utf8"
+        );
+
+        const saved = JSON.parse(raw);
+
+        if (
+            saved.balances &&
+            typeof saved.balances === "object"
+        ) {
+            state.chips.balances = saved.balances;
+        }
+
+        if (
+            saved.playerNames &&
+            typeof saved.playerNames === "object"
+        ) {
+            state.chips.playerNames = saved.playerNames;
+        }
+
+        if (Array.isArray(saved.requests)) {
+            state.chips.requests = saved.requests;
+        }
+
+        if (Array.isArray(saved.transactions)) {
+            state.chips.transactions =
+                saved.transactions.slice(0, 200);
+        }
+
+        console.log(
+            `Loaded chip balances for ${
+                Object.keys(state.chips.balances).length
+            } players`
+        );
+    } catch (error) {
+        console.error(
+            "Failed to load chip data:",
+            error
+        );
+    }
+}
+
+function saveChipDataImmediately() {
+    try {
+        fs.mkdirSync(DATA_DIRECTORY, {
+            recursive: true
+        });
+
+        const temporaryFile =
+            CHIP_DATA_FILE + ".tmp";
+
+        const data = {
+            balances: state.chips.balances,
+            playerNames: state.chips.playerNames,
+            requests: state.chips.requests,
+            transactions: state.chips.transactions,
+            savedAt: Date.now()
+        };
+
+        fs.writeFileSync(
+            temporaryFile,
+            JSON.stringify(data, null, 2),
+            "utf8"
+        );
+
+        fs.renameSync(
+            temporaryFile,
+            CHIP_DATA_FILE
+        );
+    } catch (error) {
+        console.error(
+            "Failed to save chip data:",
+            error
+        );
+    }
+}
+
+function queueChipSave() {
+    if (chipSaveTimer) {
+        clearTimeout(chipSaveTimer);
+    }
+
+    chipSaveTimer = setTimeout(() => {
+        chipSaveTimer = null;
+        saveChipDataImmediately();
+    }, 100);
+}
+
+function cleanPlayerId(value) {
     return String(value || "").trim().slice(0, 80);
 }
 
@@ -195,6 +303,8 @@ function creditChips(playerId, amount, options = {}) {
         });
     }
 
+    queueChipSave();
+
     return true;
 }
 
@@ -230,6 +340,8 @@ function debitChips(playerId, amount, options = {}) {
         gameType: options.gameType || "",
         note: options.note || ""
     });
+
+    queueChipSave();
 
     return {
         ok: true,
@@ -929,6 +1041,7 @@ app.post("/chips/request", (req, res) => {
         existing.playerName = playerName;
         existing.amount = amount;
         existing.updatedAt = Date.now();
+        queueChipSave();
 
         return res.json({
             ok: true,
@@ -947,6 +1060,7 @@ app.post("/chips/request", (req, res) => {
     };
 
     state.chips.requests.push(request);
+    queueChipSave();
 
     res.json({
         ok: true,
@@ -1020,6 +1134,8 @@ app.post("/chips/grant", (req, res) => {
             state.chips.requests.filter(
                 item => item.requestId !== request.requestId
             );
+
+        queueChipSave();
     }
 
     res.json({
@@ -1112,6 +1228,8 @@ app.post("/chips/reject", (req, res) => {
             item => item.requestId !== requestId
         );
 
+    queueChipSave();
+
     res.json({
         ok: true,
         state: publicState()
@@ -1154,6 +1272,8 @@ app.post("/chips/set-balance", (req, res) => {
         type: "balance-set",
         note: "Balance manually set by banker"
     });
+
+    queueChipSave();
 
     res.json({
         ok: true,
@@ -1683,6 +1803,30 @@ app.post("/racing/start", (req, res) => {
         state: publicState()
     });
 });
+
+function shutdownServer(signal) {
+    console.log(
+        `${signal} received. Saving chip data...`
+    );
+
+    if (chipSaveTimer) {
+        clearTimeout(chipSaveTimer);
+        chipSaveTimer = null;
+    }
+
+    saveChipDataImmediately();
+    process.exit(0);
+}
+
+process.on("SIGTERM", () => {
+    shutdownServer("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+    shutdownServer("SIGINT");
+});
+
+loadChipData();
 
 app.listen(PORT, () => {
     console.log(`TT Shared Casino server running on port ${PORT}`);
