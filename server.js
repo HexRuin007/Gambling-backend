@@ -53,20 +53,21 @@ const state = {
         currentTurnIndex: 0,
         history: []
     },
-    racing: {
-        horses: [
-            { id: "Nunu", name: "Nunu Royale" },
-            { id: "Pxpe", name: "Pxpe Express" },
-            { id: "Crack", name: "WhipCrack" },
-            { id: "rocket", name: "Sandy Rocket" },
-            { id: "storm", name: "Vespucci Storm" },
-            { id: "bullet", name: "LS Bullet" }
-        ],
-        bets: [],
-        history: [],
-        racing: false,
-        activeRace: null
-    };
+racing: {
+    horses: [
+        { id: "Nunu", name: "Nunu Royale" },
+        { id: "Pxpe", name: "Pxpe Express" },
+        { id: "Crack", name: "WhipCrack" },
+        { id: "rocket", name: "Sandy Rocket" },
+        { id: "storm", name: "Vespucci Storm" },
+        { id: "bullet", name: "LS Bullet" }
+    ],
+    bets: [],
+    history: [],
+    racing: false,
+    activeRace: null
+}
+};
     function cleanPlayerId(value) {
     return String(value || "").trim().slice(0, 80);
 }
