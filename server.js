@@ -10,6 +10,8 @@ const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
+const SLOT_MAX_HISTORY = 100;
+const SLOT_FREE_SPINS_AWARD = { 3: 8, 4: 12, 5: 20 };
 const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
@@ -48,6 +50,12 @@ const state = {
     requests: [],
     transactions: []
 },
+    slots: {
+        history: [],
+        freeSpins: {},
+        lastPaidBet: {}
+    },
+
     wheel: {
         bets: [],
         history: [],
@@ -125,6 +133,18 @@ function loadChipData() {
                 saved.transactions.slice(0, 200);
         }
 
+        if (saved.slots && typeof saved.slots === "object") {
+            if (Array.isArray(saved.slots.history)) {
+                state.slots.history = saved.slots.history.slice(0, SLOT_MAX_HISTORY);
+            }
+            if (saved.slots.freeSpins && typeof saved.slots.freeSpins === "object") {
+                state.slots.freeSpins = saved.slots.freeSpins;
+            }
+            if (saved.slots.lastPaidBet && typeof saved.slots.lastPaidBet === "object") {
+                state.slots.lastPaidBet = saved.slots.lastPaidBet;
+            }
+        }
+
         console.log(
             `Loaded chip balances for ${
                 Object.keys(state.chips.balances).length
@@ -152,6 +172,11 @@ function saveChipDataImmediately() {
             playerNames: state.chips.playerNames,
             requests: state.chips.requests,
             transactions: state.chips.transactions,
+            slots: {
+                history: state.slots.history,
+                freeSpins: state.slots.freeSpins,
+                lastPaidBet: state.slots.lastPaidBet
+            },
             savedAt: Date.now()
         };
 
@@ -437,6 +462,92 @@ function publicChipState() {
 };
 
 
+
+const SLOT_SYMBOLS = [
+    { id: "pear", label: "🍐", weight: 30, pays: { 3: 0.5, 4: 1.5, 5: 5 } },
+    { id: "cherry", label: "🍒", weight: 24, pays: { 3: 0.8, 4: 2.5, 5: 8 } },
+    { id: "bell", label: "🔔", weight: 18, pays: { 3: 1, 4: 4, 5: 12 } },
+    { id: "gem", label: "💎", weight: 12, pays: { 3: 1.5, 4: 6, 5: 20 } },
+    { id: "crown", label: "👑", weight: 8, pays: { 3: 2, 4: 10, 5: 40 } },
+    { id: "seven", label: "7️⃣", weight: 4, pays: { 3: 3, 4: 15, 5: 75 } },
+    { id: "wild", label: "🃏", weight: 3, pays: { 3: 4, 4: 20, 5: 100 } },
+    { id: "scatter", label: "⭐", weight: 3, pays: { 3: 2, 4: 8, 5: 30 } }
+];
+
+const SLOT_PAYLINES = [
+    [1,1,1,1,1], [0,0,0,0,0], [2,2,2,2,2], [0,1,2,1,0], [2,1,0,1,2],
+    [0,0,1,2,2], [2,2,1,0,0], [1,0,0,0,1], [1,2,2,2,1], [0,1,1,1,0]
+];
+
+function pickSlotSymbol() {
+    const total = SLOT_SYMBOLS.reduce((sum, symbol) => sum + symbol.weight, 0);
+    let roll = crypto.randomInt(1, total + 1);
+    for (const symbol of SLOT_SYMBOLS) {
+        roll -= symbol.weight;
+        if (roll <= 0) return symbol.id;
+    }
+    return "pear";
+}
+
+function createSlotGrid() {
+    return Array.from({ length: 3 }, () =>
+        Array.from({ length: 5 }, () => pickSlotSymbol())
+    );
+}
+
+function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
+    let payout = 0;
+    const lineWins = [];
+    const winningCells = [];
+    const lineBet = betAmount / SLOT_PAYLINES.length;
+
+    SLOT_PAYLINES.forEach((rows, lineIndex) => {
+        const symbols = rows.map((row, col) => grid[row][col]);
+        let base = symbols[0] === "wild" ? symbols.find(s => s !== "wild" && s !== "scatter") || "wild" : symbols[0];
+        if (base === "scatter") return;
+        let count = 0;
+        for (const symbol of symbols) {
+            if (symbol === base || symbol === "wild") count += 1;
+            else break;
+        }
+        if (count >= 3) {
+            const def = SLOT_SYMBOLS.find(s => s.id === base) || SLOT_SYMBOLS.find(s => s.id === "wild");
+            const multiplier = Number(def.pays[count] || 0);
+            const win = Math.floor(lineBet * multiplier);
+            payout += win;
+            lineWins.push({ line: lineIndex + 1, symbol: base, count, multiplier, win });
+            for (let col = 0; col < count; col++) winningCells.push({ row: rows[col], col });
+        }
+    });
+
+    const scatterCount = grid.flat().filter(symbol => symbol === "scatter").length;
+    let freeSpinsAwarded = 0;
+    if (scatterCount >= 3) {
+        const count = Math.min(5, scatterCount);
+        const scatterDef = SLOT_SYMBOLS.find(s => s.id === "scatter");
+        payout += Math.floor(betAmount * Number(scatterDef.pays[count] || 0));
+        freeSpinsAwarded = SLOT_FREE_SPINS_AWARD[count] || 0;
+    }
+
+    let bonusMultiplier = 1;
+    if (isFreeSpin && payout > 0) {
+        const bonusRoll = crypto.randomInt(1, 101);
+        bonusMultiplier = bonusRoll <= 5 ? 10 : bonusRoll <= 20 ? 5 : bonusRoll <= 50 ? 3 : 2;
+        payout *= bonusMultiplier;
+    }
+
+    return { payout: Math.floor(payout), lineWins, winningCells, scatterCount, freeSpinsAwarded, bonusMultiplier };
+}
+
+function publicSlotsState() {
+    return {
+        history: state.slots.history.slice(0, 50),
+        freeSpins: { ...state.slots.freeSpins },
+        paytable: SLOT_SYMBOLS.map(symbol => ({ symbol: symbol.id, label: symbol.label, pays: symbol.pays })),
+        paylines: SLOT_PAYLINES.length
+    };
+}
+
 function pickMultiplier() {
     const total = wheel.reduce((sum, item) => sum + item.weight, 0);
     let roll = crypto.randomInt(1, total + 1);
@@ -685,6 +796,7 @@ function finishHorseRace(raceId) {
 function publicState() {
     return {
         chips: publicChipState(),
+        slots: publicSlotsState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -1282,6 +1394,97 @@ app.post("/chips/set-balance", (req, res) => {
         state: publicState()
     });
 });
+
+// Slot routes
+app.post("/slots/spin", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    const requestedAmount = cleanAmount(req.body?.amount);
+
+    if (!playerId || !playerName) {
+        return res.status(400).json({ ok: false, error: "Invalid player" });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const availableFreeSpins = Math.max(0, Math.floor(Number(state.slots.freeSpins[playerId] || 0)));
+    const isFreeSpin = availableFreeSpins > 0;
+    let betAmount = requestedAmount;
+
+    if (isFreeSpin) {
+        betAmount = Math.floor(Number(state.slots.lastPaidBet[playerId] || requestedAmount || 0));
+        if (!betAmount) {
+            return res.status(400).json({ ok: false, error: "Place one paid spin before using free spins" });
+        }
+        state.slots.freeSpins[playerId] = availableFreeSpins - 1;
+    } else {
+        if (!betAmount) {
+            return res.status(400).json({ ok: false, error: "Invalid slot bet" });
+        }
+        const debited = debitChips(playerId, betAmount, {
+            playerName,
+            type: "bet",
+            gameType: "slots",
+            note: "Slot spin"
+        });
+        if (!debited.ok) return res.status(400).json(debited);
+        state.slots.lastPaidBet[playerId] = betAmount;
+    }
+
+    const grid = createSlotGrid();
+    const evaluation = evaluateSlotGrid(grid, betAmount, isFreeSpin);
+
+    if (evaluation.freeSpinsAwarded > 0) {
+        state.slots.freeSpins[playerId] =
+            Math.max(0, Number(state.slots.freeSpins[playerId] || 0)) + evaluation.freeSpinsAwarded;
+    }
+
+    if (evaluation.payout > 0) {
+        creditChips(playerId, evaluation.payout, {
+            playerName,
+            type: "payout",
+            gameType: "slots",
+            note: isFreeSpin ? "Slot free-spin winnings" : "Slot winnings"
+        });
+    }
+
+    const result = {
+        spinId: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        grid,
+        betAmount,
+        payout: evaluation.payout,
+        profit: evaluation.payout - (isFreeSpin ? 0 : betAmount),
+        freeSpin: isFreeSpin,
+        freeSpinsAwarded: evaluation.freeSpinsAwarded,
+        freeSpinsRemaining: state.slots.freeSpins[playerId] || 0,
+        bonusMultiplier: evaluation.bonusMultiplier,
+        scatterCount: evaluation.scatterCount,
+        lineWins: evaluation.lineWins,
+        winningCells: evaluation.winningCells,
+        message: evaluation.freeSpinsAwarded > 0
+            ? `${evaluation.scatterCount} scatters awarded ${evaluation.freeSpinsAwarded} free spins!`
+            : evaluation.bonusMultiplier > 1
+                ? `Free-spin bonus multiplier x${evaluation.bonusMultiplier}`
+                : evaluation.lineWins.length
+                    ? `${evaluation.lineWins.length} winning payline${evaluation.lineWins.length === 1 ? "" : "s"}`
+                    : "No winning combination",
+        createdAt: Date.now()
+    };
+
+    state.slots.history.unshift(result);
+    state.slots.history = state.slots.history.slice(0, SLOT_MAX_HISTORY);
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        result,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
 // Wheel routes
 app.post("/place-bet", (req, res) => {
     if (state.wheel.spinning) {
