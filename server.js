@@ -1997,7 +1997,6 @@ app.listen(PORT, () => {
         `Automatic games start after ${AUTO_START_DELAY_MS / 1000} seconds`
     );
 });
-'''
 
 path = Path("/mnt/data/Pearadise_Casino_Backend_Automatic_Games.js")
 path.write_text(code, encoding="utf-8")
