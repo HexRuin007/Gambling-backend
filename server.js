@@ -12,7 +12,8 @@ const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
-const SLOT_FREE_SPINS_AWARD = { 3: 8, 4: 12, 5: 20 };
+// Free spins must stay limited because they can award more free spins.
+const SLOT_FREE_SPINS_AWARD = { 3: 1, 4: 2, 5: 3 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
 const MINES_MAX_COUNT = 24;
@@ -526,8 +527,9 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-    // More common matching symbols and much stronger line payouts.
-    // Payline wins still use 1/10th of the total bet per line.
+    // Balanced around the complete slot system, including paylines,
+    // wild substitutions, scatter nudges and recurring free spins.
+    // Payline wins use 1/10th of the total bet per line.
     { id: "pear", label: "🍐", weight: 34, pays: { 3: 4, 4: 12, 5: 40 } },
     { id: "cherry", label: "🍒", weight: 28, pays: { 3: 5, 4: 16, 5: 55 } },
     { id: "bell", label: "🔔", weight: 22, pays: { 3: 6, 4: 22, 5: 75 } },
@@ -741,14 +743,16 @@ function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
     if (isFreeSpin && payout > 0) {
         const bonusRoll = crypto.randomInt(1, 101);
 
+        // Most free-spin wins pay normally. Larger multipliers are rare.
+        // This prevents the free-spin feature from creating an RTP above 100%.
         bonusMultiplier =
-            bonusRoll <= 8
-                ? 10
-                : bonusRoll <= 28
-                    ? 5
-                    : bonusRoll <= 60
-                        ? 3
-                        : 2;
+            bonusRoll <= 1
+                ? 5
+                : bonusRoll <= 5
+                    ? 3
+                    : bonusRoll <= 15
+                        ? 2
+                        : 1;
 
         payout *= bonusMultiplier;
     }
