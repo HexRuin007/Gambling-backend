@@ -41,8 +41,7 @@ let wheelAutoTimer = null;
 let blackjackAutoTimer = null;
 let racingAutoTimer = null;
 let rouletteAutoTimer = null;
-let crashAutoTimer = null;
-let crashFinishTimer = null;
+
 
 const wheel = [
     { multiplier: 0,    weight: 12 },
@@ -94,11 +93,8 @@ const state = {
     },
 
     crash: {
-        bets: [],
-        history: [],
-        running: false,
-        activeRound: null,
-        autoStartAt: null
+        games: {},
+        history: []
     },
 
     wheel: {
@@ -1868,26 +1864,21 @@ function scheduleRouletteAutoStart() {
 const CRASH_GROWTH_RATE = 0.18;
 const CRASH_HOUSE_FACTOR = 0.97;
 const CRASH_MAX_MULTIPLIER = 100;
-
-// Every round stays at 1.00x briefly before the multiplier begins rising.
-const CRASH_LAUNCH_GRACE_MS = 3000;
-
-// Prevent effectively instant 1.00x crashes.
-const CRASH_MIN_MULTIPLIER = 1.20;
+const CRASH_MIN_MULTIPLIER = 1.01;
 
 function ensureCrashState() {
     if (!state.crash || typeof state.crash !== "object") {
         state.crash = {
-            bets: [],
-            history: [],
-            running: false,
-            activeRound: null,
-            autoStartAt: null
+            games: {},
+            history: []
         };
     }
 
-    if (!Array.isArray(state.crash.bets)) {
-        state.crash.bets = [];
+    if (
+        !state.crash.games ||
+        typeof state.crash.games !== "object"
+    ) {
+        state.crash.games = {};
     }
 
     if (!Array.isArray(state.crash.history)) {
@@ -1897,38 +1888,7 @@ function ensureCrashState() {
     return state.crash;
 }
 
-function currentCrashMultiplier(now = Date.now()) {
-    const crash = ensureCrashState();
-
-    if (!crash.running || !crash.activeRound) {
-        return 1;
-    }
-
-    const elapsedSeconds = Math.max(
-        0,
-        (
-            now -
-            crash.activeRound.startedAt -
-            Number(
-                crash.activeRound.graceMs ||
-                CRASH_LAUNCH_GRACE_MS
-            )
-        ) / 1000
-    );
-
-    return Math.max(
-        1,
-        Math.floor(
-            Math.exp(
-                CRASH_GROWTH_RATE * elapsedSeconds
-            ) * 100
-        ) / 100
-    );
-}
-
 function pickCrashPoint() {
-    // Standard inverse crash curve with a 3% mathematical house edge.
-    // The server chooses the point before the animation begins.
     const random =
         crypto.randomInt(1, 1_000_001) / 1_000_001;
 
@@ -1943,157 +1903,115 @@ function pickCrashPoint() {
     );
 }
 
-function publicCrashState() {
-    const crash = ensureCrashState();
+function getCrashMultiplier(game, now = Date.now()) {
+    if (!game || game.status !== "running") {
+        return 1;
+    }
+
+    const elapsedSeconds = Math.max(
+        0,
+        (now - game.startedAt) / 1000
+    );
+
+    return Math.max(
+        1,
+        Math.floor(
+            Math.exp(
+                CRASH_GROWTH_RATE * elapsedSeconds
+            ) * 100
+        ) / 100
+    );
+}
+
+function publicCrashGame(game) {
+    if (!game) return null;
 
     return {
-        bets: crash.bets.map(bet => ({
-            betId: bet.betId,
-            playerId: bet.playerId,
-            playerName: bet.playerName,
-            amount: bet.amount,
-            cashedOut: !!bet.cashedOut,
-            cashoutMultiplier:
-                bet.cashoutMultiplier || null,
-            payout: bet.payout || 0
-        })),
-        history: crash.history
-            .slice(0, 20)
-            .map(round => ({ ...round })),
-        running: crash.running,
-        activeRound: crash.activeRound
-            ? {
-                roundId: crash.activeRound.roundId,
-                startedAt: crash.activeRound.startedAt,
-                growthRate: CRASH_GROWTH_RATE,
-                graceMs:
-                    crash.activeRound.graceMs ||
-                    CRASH_LAUNCH_GRACE_MS
-            }
-            : null,
-        autoStartAt: crash.autoStartAt
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        startedAt: game.startedAt,
+        growthRate: CRASH_GROWTH_RATE,
+        status: game.status
     };
 }
 
-function finishCrashRound(roundId) {
+function publicCrashState() {
     const crash = ensureCrashState();
+    const games = {};
 
-    if (
-        !crash.running ||
-        !crash.activeRound ||
-        crash.activeRound.roundId !== roundId
-    ) {
-        return;
+    for (const [playerId, game] of Object.entries(
+        crash.games
+    )) {
+        games[playerId] =
+            publicCrashGame(game);
     }
 
-    const crashPoint =
-        crash.activeRound.crashPoint;
+    return {
+        games,
+        history: crash.history
+            .slice(0, 30)
+            .map(entry => ({ ...entry }))
+    };
+}
 
-    const results = crash.bets.map(bet => ({
-        playerId: bet.playerId,
-        playerName: bet.playerName,
-        amount: bet.amount,
-        cashedOut: !!bet.cashedOut,
-        cashoutMultiplier:
-            bet.cashoutMultiplier || null,
-        payout: bet.payout || 0,
-        profit:
-            (bet.payout || 0) - bet.amount
-    }));
+function finishSoloCrashGame(
+    game,
+    result,
+    payout,
+    cashoutMultiplier = null
+) {
+    const crash = ensureCrashState();
 
     crash.history.unshift({
-        roundId,
-        crashPoint,
-        results,
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        crashPoint: game.crashPoint,
+        result,
+        cashoutMultiplier,
+        payout,
+        profit: payout - game.betAmount,
         createdAt: Date.now()
     });
 
-    crash.history = crash.history.slice(0, 50);
-    crash.running = false;
-    crash.activeRound = null;
-    crash.bets = [];
-    crash.autoStartAt = null;
-    crashFinishTimer = null;
+    crash.history =
+        crash.history.slice(0, 50);
+
+    delete crash.games[game.playerId];
     queueChipSave();
 }
 
-function startCrashRound() {
-    const crash = ensureCrashState();
-
-    if (crash.running) {
-        return {
-            ok: false,
-            error: "Crash round already running"
-        };
-    }
-
-    if (!crash.bets.length) {
-        return {
-            ok: false,
-            error: "No crash bets"
-        };
-    }
-
-    const crashPoint = pickCrashPoint();
-    const roundId =
-        crypto.randomBytes(8).toString("hex");
-    const startedAt = Date.now();
-
-    const durationMs =
-        CRASH_LAUNCH_GRACE_MS +
-        Math.max(
-            1200,
-            Math.log(crashPoint) /
-                CRASH_GROWTH_RATE *
-                1000
-        );
-
-    crash.running = true;
-    crash.autoStartAt = null;
-    crash.activeRound = {
-        roundId,
-        startedAt,
-        crashPoint,
-        graceMs: CRASH_LAUNCH_GRACE_MS
-    };
-
-    crashFinishTimer = setTimeout(
-        () => finishCrashRound(roundId),
-        durationMs
+function scheduleSoloCrash(game) {
+    const durationMs = Math.max(
+        50,
+        Math.log(game.crashPoint) /
+            CRASH_GROWTH_RATE *
+            1000
     );
 
-    return {
-        ok: true,
-        roundId,
-        startedAt
-    };
-}
-
-function scheduleCrashAutoStart() {
-    const crash = ensureCrashState();
-
-    if (
-        crashAutoTimer ||
-        crash.running ||
-        !crash.bets.length
-    ) {
-        return;
-    }
-
-    crash.autoStartAt =
-        Date.now() + AUTO_START_DELAY_MS;
-
-    crashAutoTimer = setTimeout(() => {
-        crashAutoTimer = null;
-        crash.autoStartAt = null;
+    setTimeout(() => {
+        const crash = ensureCrashState();
+        const active =
+            crash.games[game.playerId];
 
         if (
-            !crash.running &&
-            crash.bets.length
+            !active ||
+            active.gameId !== game.gameId ||
+            active.status !== "running"
         ) {
-            startCrashRound();
+            return;
         }
-    }, AUTO_START_DELAY_MS);
+
+        finishSoloCrashGame(
+            active,
+            "crashed",
+            0,
+            null
+        );
+    }, durationMs);
 }
 
 function publicState() {
@@ -2563,6 +2481,9 @@ app.post("/chips/reset-all", (req, res) => {
     state.roulette.spinning = false;
     state.roulette.activeSpin = null;
     state.roulette.autoStartAt = null;
+
+    state.crash.games = {};
+    state.crash.history = [];
 
     state.wheel.bets = [];
     state.wheel.history = [];
@@ -3292,20 +3213,15 @@ app.post("/roulette/clear-my-bets", (req, res) => {
 
 // Crash routes
 
-app.post("/crash/place-bet", (req, res) => {
+app.post("/crash/start", (req, res) => {
     const crash = ensureCrashState();
-
-    if (crash.running) {
-        return res.status(409).json({
-            ok: false,
-            error: "Wait for the current crash round to finish"
-        });
-    }
 
     const playerId =
         cleanPlayerId(req.body?.playerId);
+
     const playerName =
         cleanPlayerName(req.body?.playerName);
+
     const amount =
         cleanAmount(req.body?.amount);
 
@@ -3316,59 +3232,46 @@ app.post("/crash/place-bet", (req, res) => {
         });
     }
 
-    const existing = crash.bets.find(
-        bet => bet.playerId === playerId
-    );
-
-    if (existing) {
-        const changed = replaceReservedBet(
-            existing,
-            amount,
-            playerId,
-            playerName,
-            "crash"
-        );
-
-        if (!changed.ok) {
-            return res.status(400).json(changed);
-        }
-
-        existing.amount = amount;
-        existing.playerName = playerName;
-    } else {
-        const debit = debitChips(
-            playerId,
-            amount,
-            {
-                playerName,
-                type: "bet",
-                gameType: "crash",
-                note: "Crash bet"
-            }
-        );
-
-        if (!debit.ok) {
-            return res.status(400).json(debit);
-        }
-
-        crash.bets.push({
-            betId:
-                crypto.randomBytes(8).toString("hex"),
-            playerId,
-            playerName,
-            amount,
-            cashedOut: false,
-            cashoutMultiplier: null,
-            payout: 0,
-            createdAt: Date.now()
+    if (crash.games[playerId]) {
+        return res.status(409).json({
+            ok: false,
+            error: "Finish your current Crash game first"
         });
     }
 
-    scheduleCrashAutoStart();
+    const debit = debitChips(
+        playerId,
+        amount,
+        {
+            playerName,
+            type: "bet",
+            gameType: "crash",
+            note: "Solo Crash bet"
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    const game = {
+        gameId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        betAmount: amount,
+        crashPoint: pickCrashPoint(),
+        startedAt: Date.now(),
+        status: "running"
+    };
+
+    crash.games[playerId] = game;
+    scheduleSoloCrash(game);
     queueChipSave();
 
     res.json({
         ok: true,
+        game: publicCrashGame(game),
         balance: getChipBalance(playerId),
         state: publicState()
     });
@@ -3376,77 +3279,66 @@ app.post("/crash/place-bet", (req, res) => {
 
 app.post("/crash/cashout", (req, res) => {
     const crash = ensureCrashState();
+
     const playerId =
         cleanPlayerId(req.body?.playerId);
 
-    if (
-        !crash.running ||
-        !crash.activeRound
-    ) {
-        return res.status(409).json({
-            ok: false,
-            error: "No crash round is running"
-        });
-    }
+    const game =
+        crash.games[playerId];
 
-    const bet = crash.bets.find(
-        item => item.playerId === playerId
-    );
-
-    if (!bet) {
+    if (!game || game.status !== "running") {
         return res.status(404).json({
             ok: false,
-            error: "You do not have a bet in this round"
-        });
-    }
-
-    if (bet.cashedOut) {
-        return res.status(409).json({
-            ok: false,
-            error: "You already cashed out"
+            error: "No active Crash game"
         });
     }
 
     const multiplier =
-        currentCrashMultiplier();
+        getCrashMultiplier(game);
 
-    if (
-        multiplier >=
-        crash.activeRound.crashPoint
-    ) {
+    if (multiplier >= game.crashPoint) {
+        finishSoloCrashGame(
+            game,
+            "crashed",
+            0,
+            null
+        );
+
         return res.status(409).json({
             ok: false,
-            error: "Too late - the round crashed"
+            error: "Too late - it already crashed"
         });
     }
 
     const payout = Math.floor(
-        bet.amount * multiplier
+        game.betAmount * multiplier
     );
 
     const credited = creditChips(
         playerId,
         payout,
         {
-            playerName: bet.playerName,
+            playerName: game.playerName,
             type: "payout",
             gameType: "crash",
             note:
-                `Crash cashout at x${multiplier.toFixed(2)}`
+                `Solo Crash cashout at x${multiplier.toFixed(2)}`
         }
     );
 
     if (!credited) {
         return res.status(400).json({
             ok: false,
-            error: "Could not pay crash winnings"
+            error: "Could not pay Crash winnings"
         });
     }
 
-    bet.cashedOut = true;
-    bet.cashoutMultiplier = multiplier;
-    bet.payout = payout;
-    queueChipSave();
+    finishSoloCrashGame(
+        game,
+        "cashout",
+        payout,
+        multiplier
+    );
 
     res.json({
         ok: true,
@@ -3457,58 +3349,8 @@ app.post("/crash/cashout", (req, res) => {
     });
 });
 
-app.post("/crash/clear-bet", (req, res) => {
-    const crash = ensureCrashState();
-    const playerId =
-        cleanPlayerId(req.body?.playerId);
-
-    if (crash.running) {
-        return res.status(409).json({
-            ok: false,
-            error: "Cannot clear a bet during the round"
-        });
-    }
-
-    const bet = crash.bets.find(
-        item => item.playerId === playerId
-    );
-
-    if (!bet) {
-        return res.status(404).json({
-            ok: false,
-            error: "No crash bet to clear"
-        });
-    }
-
-    refundBets(
-        [bet],
-        "crash",
-        "Crash bet cleared"
-    );
-
-    crash.bets = crash.bets.filter(
-        item => item.playerId !== playerId
-    );
-
-    if (!crash.bets.length) {
-        crash.autoStartAt = null;
-
-        if (crashAutoTimer) {
-            clearTimeout(crashAutoTimer);
-            crashAutoTimer = null;
-        }
-    }
-
-    queueChipSave();
-
-    res.json({
-        ok: true,
-        balance: getChipBalance(playerId),
-        state: publicState()
-    });
-});
-
 // Deal game routes
+
 
 app.post("/deal/start", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
