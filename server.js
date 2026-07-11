@@ -1869,6 +1869,12 @@ const CRASH_GROWTH_RATE = 0.18;
 const CRASH_HOUSE_FACTOR = 0.97;
 const CRASH_MAX_MULTIPLIER = 100;
 
+// Every round stays at 1.00x briefly before the multiplier begins rising.
+const CRASH_LAUNCH_GRACE_MS = 3000;
+
+// Prevent effectively instant 1.00x crashes.
+const CRASH_MIN_MULTIPLIER = 1.20;
+
 function ensureCrashState() {
     if (!state.crash || typeof state.crash !== "object") {
         state.crash = {
@@ -1900,7 +1906,14 @@ function currentCrashMultiplier(now = Date.now()) {
 
     const elapsedSeconds = Math.max(
         0,
-        (now - crash.activeRound.startedAt) / 1000
+        (
+            now -
+            crash.activeRound.startedAt -
+            Number(
+                crash.activeRound.graceMs ||
+                CRASH_LAUNCH_GRACE_MS
+            )
+        ) / 1000
     );
 
     return Math.max(
@@ -1922,7 +1935,7 @@ function pickCrashPoint() {
     return Math.min(
         CRASH_MAX_MULTIPLIER,
         Math.max(
-            1,
+            CRASH_MIN_MULTIPLIER,
             Math.floor(
                 (CRASH_HOUSE_FACTOR / random) * 100
             ) / 100
@@ -1952,7 +1965,10 @@ function publicCrashState() {
             ? {
                 roundId: crash.activeRound.roundId,
                 startedAt: crash.activeRound.startedAt,
-                growthRate: CRASH_GROWTH_RATE
+                growthRate: CRASH_GROWTH_RATE,
+                graceMs:
+                    crash.activeRound.graceMs ||
+                    CRASH_LAUNCH_GRACE_MS
             }
             : null,
         autoStartAt: crash.autoStartAt
@@ -2023,19 +2039,22 @@ function startCrashRound() {
         crypto.randomBytes(8).toString("hex");
     const startedAt = Date.now();
 
-    const durationMs = Math.max(
-        250,
-        Math.log(crashPoint) /
-            CRASH_GROWTH_RATE *
-            1000
-    );
+    const durationMs =
+        CRASH_LAUNCH_GRACE_MS +
+        Math.max(
+            1200,
+            Math.log(crashPoint) /
+                CRASH_GROWTH_RATE *
+                1000
+        );
 
     crash.running = true;
     crash.autoStartAt = null;
     crash.activeRound = {
         roundId,
         startedAt,
-        crashPoint
+        crashPoint,
+        graceMs: CRASH_LAUNCH_GRACE_MS
     };
 
     crashFinishTimer = setTimeout(
