@@ -1762,11 +1762,20 @@ app.post("/chips/reset-all", (req, res) => {
     state.racing.activeRace = null;
     state.racing.autoStartAt = null;
 
+    const resetAt = Date.now();
+
     saveChipDataImmediately();
+
+    console.warn(
+        `Casino reset completed by ${requesterId}: ` +
+        `${previousPlayerCount} players and ` +
+        `${previousTotalChips} chips cleared`
+    );
 
     res.json({
         ok: true,
         resetBy: requesterId,
+        resetAt,
         previousPlayerCount,
         previousTotalChips,
         state: publicState()
