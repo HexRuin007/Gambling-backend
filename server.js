@@ -82,6 +82,14 @@ const state = {
         history: []
     },
 
+    roulette: {
+        bets: [],
+        history: [],
+        spinning: false,
+        activeSpin: null,
+        autoStartAt: null
+    },
+
     wheel: {
         bets: [],
         history: [],
@@ -201,6 +209,25 @@ function loadChipData() {
             }
         }
 
+        if (
+            saved.roulette &&
+            typeof saved.roulette === "object"
+        ) {
+            if (Array.isArray(saved.roulette.history)) {
+                state.roulette.history =
+                    saved.roulette.history.slice(0, 30);
+            }
+
+            if (Array.isArray(saved.roulette.bets)) {
+                state.roulette.bets =
+                    saved.roulette.bets;
+            }
+
+            state.roulette.spinning = false;
+            state.roulette.activeSpin = null;
+            state.roulette.autoStartAt = null;
+        }
+
         console.log(
             `Loaded chip balances for ${
                 Object.keys(state.chips.balances).length
@@ -241,6 +268,10 @@ function saveChipDataImmediately() {
             deal: {
                 games: state.deal.games,
                 history: state.deal.history
+            },
+            roulette: {
+                bets: state.roulette.bets,
+                history: state.roulette.history
             },
             savedAt: Date.now()
         };
@@ -1590,22 +1621,52 @@ function roulettePayoutMultiplier(type) {
     return 2;
 }
 
+function ensureRouletteState() {
+    if (
+        !state.roulette ||
+        typeof state.roulette !== "object"
+    ) {
+        state.roulette = {
+            bets: [],
+            history: [],
+            spinning: false,
+            activeSpin: null,
+            autoStartAt: null
+        };
+    }
+
+    if (!Array.isArray(state.roulette.bets)) {
+        state.roulette.bets = [];
+    }
+
+    if (!Array.isArray(state.roulette.history)) {
+        state.roulette.history = [];
+    }
+
+    state.roulette.spinning =
+        Boolean(state.roulette.spinning);
+
+    return state.roulette;
+}
+
 function publicRouletteState() {
+    const roulette = ensureRouletteState();
+
     return {
-        bets: state.roulette.bets.map(
+        bets: roulette.bets.map(
             bet => ({ ...bet })
         ),
-        history: state.roulette.history
+        history: roulette.history
             .slice(0, 30)
             .map(entry => ({ ...entry })),
-        spinning: state.roulette.spinning,
-        activeSpin: state.roulette.activeSpin,
-        autoStartAt: state.roulette.autoStartAt
+        spinning: roulette.spinning,
+        activeSpin: roulette.activeSpin,
+        autoStartAt: roulette.autoStartAt
     };
 }
 
 function finishRouletteSpin(spinId) {
-    const roulette = state.roulette;
+    const roulette = ensureRouletteState();
     const active = roulette.activeSpin;
 
     if (
@@ -1657,7 +1718,7 @@ function finishRouletteSpin(spinId) {
 }
 
 function startRouletteSpin() {
-    const roulette = state.roulette;
+    const roulette = ensureRouletteState();
 
     if (roulette.spinning) {
         return {
@@ -1733,7 +1794,7 @@ function startRouletteSpin() {
 }
 
 function scheduleRouletteAutoStart() {
-    const roulette = state.roulette;
+    const roulette = ensureRouletteState();
 
     if (
         rouletteAutoTimer ||
@@ -2664,7 +2725,7 @@ app.post("/slots/spin", (req, res) => {
 // Roulette routes
 
 app.post("/roulette/place-bet", (req, res) => {
-    const roulette = state.roulette;
+    const roulette = ensureRouletteState();
 
     if (roulette.spinning) {
         return res.status(409).json({
@@ -2776,7 +2837,7 @@ app.post("/roulette/place-bet", (req, res) => {
 });
 
 app.post("/roulette/clear-my-bets", (req, res) => {
-    const roulette = state.roulette;
+    const roulette = ensureRouletteState();
     const playerId =
         cleanPlayerId(req.body?.playerId);
 
