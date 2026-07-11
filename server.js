@@ -1663,6 +1663,49 @@ app.post("/admin-login", (req, res) => {
 
 // Chip routes
 
+app.post("/chips/register-player", (req, res) => {
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
+
+    const playerName = cleanPlayerName(
+        req.body?.playerName
+    );
+
+    if (!playerId || !playerName) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid player"
+        });
+    }
+
+    const existedBefore =
+        Object.prototype.hasOwnProperty.call(
+            state.chips.balances,
+            playerId
+        );
+
+    rememberPlayer(
+        playerId,
+        playerName
+    );
+
+    res.json({
+        ok: true,
+        playerId,
+        playerName,
+        newPlayer: !existedBefore,
+        startingBonusGranted:
+            !existedBefore
+                ? NEW_PLAYER_STARTING_CHIPS
+                : 0,
+        balance:
+            getChipBalance(playerId),
+        state:
+            publicState()
+    });
+});
+
 app.get("/chips/daily-profit", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
