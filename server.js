@@ -20,6 +20,10 @@ const MINES_MIN_COUNT = 1;
 const MINES_MAX_COUNT = 24;
 const MINES_HOUSE_FACTOR = 0.97;
 const MINES_MAX_HISTORY = 100;
+const DEAL_CASE_COUNT = 16;
+const DEAL_CASES_PER_ROUND = 3;
+const DEAL_MAX_HISTORY = 100;
+const DEAL_OFFER_BASE_FACTOR = 0.78;
 const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
@@ -66,6 +70,11 @@ const state = {
     },
 
     mines: {
+        games: {},
+        history: []
+    },
+
+    deal: {
         games: {},
         history: []
     },
@@ -178,6 +187,17 @@ function loadChipData() {
             }
         }
 
+        if (saved.deal && typeof saved.deal === "object") {
+            if (saved.deal.games && typeof saved.deal.games === "object") {
+                state.deal.games = saved.deal.games;
+            }
+
+            if (Array.isArray(saved.deal.history)) {
+                state.deal.history =
+                    saved.deal.history.slice(0, DEAL_MAX_HISTORY);
+            }
+        }
+
         console.log(
             `Loaded chip balances for ${
                 Object.keys(state.chips.balances).length
@@ -214,6 +234,10 @@ function saveChipDataImmediately() {
             mines: {
                 games: state.mines.games,
                 history: state.mines.history
+            },
+            deal: {
+                games: state.deal.games,
+                history: state.deal.history
             },
             savedAt: Date.now()
         };
@@ -938,6 +962,144 @@ function publicSlotsState() {
 }
 
 
+
+const DEAL_PRIZE_MULTIPLIERS = [
+    0,
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    1,
+    1.25,
+    1.5,
+    2,
+    3,
+    5,
+    10,
+    15,
+    25,
+    50,
+    100
+];
+
+function shuffleValues(values) {
+    const shuffled = [...values];
+
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [shuffled[i], shuffled[j]] =
+            [shuffled[j], shuffled[i]];
+    }
+
+    return shuffled;
+}
+
+function publicDealGame(game) {
+    if (!game) return null;
+
+    return {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        chosenCase: game.chosenCase,
+        openedCases: [...game.openedCases],
+        openedValues: { ...game.openedValues },
+        currentOffer: game.currentOffer || 0,
+        casesToOpen:
+            game.currentOffer > 0
+                ? 0
+                : Math.min(
+                    DEAL_CASES_PER_ROUND,
+                    DEAL_CASE_COUNT -
+                    game.openedCases.length -
+                    1
+                ),
+        remainingCases: DEAL_CASE_COUNT -
+            game.openedCases.length,
+        status: game.status,
+        createdAt: game.createdAt
+    };
+}
+
+function publicDealState() {
+    const games = {};
+
+    for (const [playerId, game] of Object.entries(
+        state.deal.games
+    )) {
+        games[playerId] = publicDealGame(game);
+    }
+
+    return {
+        caseCount: DEAL_CASE_COUNT,
+        games,
+        history: state.deal.history
+            .slice(0, 50)
+            .map(entry => ({ ...entry }))
+    };
+}
+
+function calculateDealOffer(game) {
+    const remainingValues = game.caseValues.filter(
+        (_, index) =>
+            !game.openedCases.includes(index)
+    );
+
+    if (!remainingValues.length) return 0;
+
+    const average = remainingValues.reduce(
+        (sum, value) => sum + value,
+        0
+    ) / remainingValues.length;
+
+    const progress =
+        game.openedCases.length /
+        (DEAL_CASE_COUNT - 1);
+
+    const factor = Math.min(
+        0.94,
+        DEAL_OFFER_BASE_FACTOR +
+        progress * 0.14
+    );
+
+    return Math.max(
+        1,
+        Math.floor(average * factor)
+    );
+}
+
+function finishDealGame(game, result, payout) {
+    const chosenValue =
+        game.caseValues[game.chosenCase];
+
+    const historyEntry = {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        chosenCase: game.chosenCase,
+        chosenValue,
+        result,
+        payout,
+        profit: payout - game.betAmount,
+        openedCases: [...game.openedCases],
+        createdAt: Date.now()
+    };
+
+    state.deal.history.unshift(historyEntry);
+    state.deal.history =
+        state.deal.history.slice(
+            0,
+            DEAL_MAX_HISTORY
+        );
+
+    delete state.deal.games[game.playerId];
+    queueChipSave();
+
+    return historyEntry;
+}
+
 function combination(n, k) {
     if (k < 0 || k > n) return 0;
     if (k === 0 || k === n) return 1;
@@ -1335,6 +1497,7 @@ function publicState() {
         chips: publicChipState(),
         slots: publicSlotsState(),
         mines: publicMinesState(),
+        deal: publicDealState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -1786,6 +1949,9 @@ app.post("/chips/reset-all", (req, res) => {
     state.mines.games = {};
     state.mines.history = [];
 
+    state.deal.games = {};
+    state.deal.history = [];
+
     state.wheel.bets = [];
     state.wheel.history = [];
     state.wheel.spinning = false;
@@ -2218,6 +2384,261 @@ app.post("/slots/spin", (req, res) => {
     });
 });
 
+
+// Deal game routes
+
+app.post("/deal/start", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    const betAmount = cleanAmount(req.body?.amount);
+    const chosenCase = Math.floor(
+        Number(req.body?.chosenCase)
+    );
+
+    if (!playerId || !playerName || !betAmount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid deal game bet"
+        });
+    }
+
+    if (
+        !Number.isInteger(chosenCase) ||
+        chosenCase < 0 ||
+        chosenCase >= DEAL_CASE_COUNT
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Choose a valid case"
+        });
+    }
+
+    if (state.deal.games[playerId]) {
+        return res.status(409).json({
+            ok: false,
+            error: "Finish your current deal game first"
+        });
+    }
+
+    const debit = debitChips(
+        playerId,
+        betAmount,
+        {
+            playerName,
+            type: "bet",
+            gameType: "deal",
+            note: "Deal game started"
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    const caseValues = shuffleValues(
+        DEAL_PRIZE_MULTIPLIERS.map(
+            multiplier =>
+                Math.floor(
+                    betAmount * multiplier
+                )
+        )
+    );
+
+    const game = {
+        gameId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        betAmount,
+        chosenCase,
+        caseValues,
+        openedCases: [],
+        openedValues: {},
+        currentOffer: 0,
+        roundOpened: 0,
+        status: "playing",
+        createdAt: Date.now()
+    };
+
+    state.deal.games[playerId] = game;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        game: publicDealGame(game),
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/deal/open-case", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const caseIndex = Math.floor(
+        Number(req.body?.caseIndex)
+    );
+
+    const game = state.deal.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({
+            ok: false,
+            error: "No active deal game"
+        });
+    }
+
+    if (game.currentOffer > 0) {
+        return res.status(409).json({
+            ok: false,
+            error: "Choose Deal or No Deal first"
+        });
+    }
+
+    if (
+        !Number.isInteger(caseIndex) ||
+        caseIndex < 0 ||
+        caseIndex >= DEAL_CASE_COUNT ||
+        caseIndex === game.chosenCase ||
+        game.openedCases.includes(caseIndex)
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "That case cannot be opened"
+        });
+    }
+
+    game.openedCases.push(caseIndex);
+    game.openedValues[caseIndex] =
+        game.caseValues[caseIndex];
+    game.roundOpened += 1;
+
+    const unopenedOtherCases =
+        DEAL_CASE_COUNT -
+        game.openedCases.length -
+        1;
+
+    if (unopenedOtherCases <= 0) {
+        const payout =
+            game.caseValues[game.chosenCase];
+
+        if (payout > 0) {
+            creditChips(
+                playerId,
+                payout,
+                {
+                    playerName: game.playerName,
+                    type: "payout",
+                    gameType: "deal",
+                    note: "Chosen case payout"
+                }
+            );
+        }
+
+        const history = finishDealGame(
+            game,
+            "chosen-case",
+            payout
+        );
+
+        return res.json({
+            ok: true,
+            finished: true,
+            openedCase: caseIndex,
+            openedValue:
+                game.caseValues[caseIndex],
+            chosenValue: payout,
+            history,
+            balance:
+                getChipBalance(playerId),
+            state: publicState()
+        });
+    }
+
+    if (
+        game.roundOpened >=
+        Math.min(
+            DEAL_CASES_PER_ROUND,
+            unopenedOtherCases + 1
+        )
+    ) {
+        game.currentOffer =
+            calculateDealOffer(game);
+        game.roundOpened = 0;
+    }
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        finished: false,
+        openedCase: caseIndex,
+        openedValue:
+            game.caseValues[caseIndex],
+        offer: game.currentOffer,
+        game: publicDealGame(game),
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/deal/accept", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const game = state.deal.games[playerId];
+
+    if (!game || !game.currentOffer) {
+        return res.status(400).json({
+            ok: false,
+            error: "No banker offer available"
+        });
+    }
+
+    const payout = game.currentOffer;
+
+    creditChips(
+        playerId,
+        payout,
+        {
+            playerName: game.playerName,
+            type: "payout",
+            gameType: "deal",
+            note: "Accepted banker offer"
+        }
+    );
+
+    const history = finishDealGame(
+        game,
+        "deal",
+        payout
+    );
+
+    res.json({
+        ok: true,
+        payout,
+        history,
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/deal/reject", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const game = state.deal.games[playerId];
+
+    if (!game || !game.currentOffer) {
+        return res.status(400).json({
+            ok: false,
+            error: "No banker offer available"
+        });
+    }
+
+    game.currentOffer = 0;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        game: publicDealGame(game),
+        state: publicState()
+    });
+});
 
 // Mines routes
 
