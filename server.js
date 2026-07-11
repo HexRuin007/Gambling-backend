@@ -23,7 +23,9 @@ const MINES_MAX_HISTORY = 100;
 const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
-const DEAL_OFFER_BASE_FACTOR = 0.78;
+// Early offers are deliberately conservative and become
+// increasingly fair as fewer cases remain.
+const DEAL_OFFER_BASE_FACTOR = 0.68;
 const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
@@ -964,22 +966,25 @@ function publicSlotsState() {
 
 
 const DEAL_PRIZE_MULTIPLIERS = [
+    // Average value is exactly x0.95 of the player's bet.
+    // This gives the game a realistic long-term house edge while
+    // still leaving several profitable cases.
     0,
-    0.1,
-    0.25,
-    0.5,
+    0.05,
+    0.10,
+    0.20,
+    0.30,
+    0.40,
+    0.50,
+    0.60,
     0.75,
+    0.90,
     1,
-    1.25,
-    1.5,
+    1.20,
+    1.50,
     2,
-    3,
-    5,
-    10,
-    15,
-    25,
-    50,
-    100
+    2.50,
+    3.20
 ];
 
 function shuffleValues(values) {
@@ -1058,9 +1063,9 @@ function calculateDealOffer(game) {
         (DEAL_CASE_COUNT - 1);
 
     const factor = Math.min(
-        0.94,
+        0.92,
         DEAL_OFFER_BASE_FACTOR +
-        progress * 0.14
+        progress * 0.24
     );
 
     return Math.max(
