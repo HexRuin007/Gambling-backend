@@ -7,6 +7,7 @@ import path from "path";
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
 const CHIP_RESET_OWNER_ID = "229051";
+const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
@@ -30,7 +31,7 @@ const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
 const app = express();
-app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin"] }));
+app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin", "X-Discord-Bot-Secret"] }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -1310,6 +1311,25 @@ function requireAdmin(req, res) {
         res.status(403).json({ ok: false, error: "Not banker" });
         return false;
     }
+    return true;
+}
+
+function requireDiscordBot(req, res) {
+    const providedSecret = String(
+        req.headers["x-discord-bot-secret"] || ""
+    ).trim();
+
+    if (
+        !DISCORD_BOT_SECRET ||
+        providedSecret !== DISCORD_BOT_SECRET
+    ) {
+        res.status(403).json({
+            ok: false,
+            error: "Discord bot authentication failed"
+        });
+        return false;
+    }
+
     return true;
 }
 
@@ -2595,6 +2615,129 @@ app.post("/chips/set-balance", (req, res) => {
         playerId,
         balance,
         state: publicState()
+    });
+});
+
+// Discord bot chip-request routes
+
+app.get("/discord/chips/requests", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    res.json({
+        ok: true,
+        requests: state.chips.requests
+            .filter(request => request.status === "pending")
+            .map(request => ({
+                ...request,
+                currentBalance:
+                    getChipBalance(request.playerId)
+            }))
+    });
+});
+
+app.post("/discord/chips/approve", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const requestId = String(
+        req.body?.requestId || ""
+    ).trim();
+
+    const discordUserId = String(
+        req.body?.discordUserId || ""
+    ).trim();
+
+    const discordDisplayName = String(
+        req.body?.discordDisplayName ||
+        "Discord approver"
+    ).trim().slice(0, 80);
+
+    const request = state.chips.requests.find(
+        item =>
+            item.requestId === requestId &&
+            item.status === "pending"
+    );
+
+    if (!request) {
+        return res.status(404).json({
+            ok: false,
+            error: "Chip request not found or already handled"
+        });
+    }
+
+    const granted = creditChips(
+        request.playerId,
+        request.amount,
+        {
+            playerName: request.playerName,
+            type: "banker-grant",
+            note:
+                `Discord approval by ${discordDisplayName} ` +
+                `(${discordUserId || "unknown"})`
+        }
+    );
+
+    if (!granted) {
+        return res.status(400).json({
+            ok: false,
+            error: "Could not grant requested chips"
+        });
+    }
+
+    state.chips.requests =
+        state.chips.requests.filter(
+            item =>
+                item.requestId !== requestId
+        );
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        action: "approved",
+        requestId,
+        playerId: request.playerId,
+        playerName: request.playerName,
+        amount: request.amount,
+        newBalance:
+            getChipBalance(request.playerId)
+    });
+});
+
+app.post("/discord/chips/deny", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const requestId = String(
+        req.body?.requestId || ""
+    ).trim();
+
+    const request = state.chips.requests.find(
+        item =>
+            item.requestId === requestId &&
+            item.status === "pending"
+    );
+
+    if (!request) {
+        return res.status(404).json({
+            ok: false,
+            error: "Chip request not found or already handled"
+        });
+    }
+
+    state.chips.requests =
+        state.chips.requests.filter(
+            item =>
+                item.requestId !== requestId
+        );
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        action: "denied",
+        requestId,
+        playerId: request.playerId,
+        playerName: request.playerName,
+        amount: request.amount
     });
 });
 
