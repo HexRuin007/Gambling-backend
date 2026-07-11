@@ -39,6 +39,7 @@ const adminTokens = new Set();
 let wheelAutoTimer = null;
 let blackjackAutoTimer = null;
 let racingAutoTimer = null;
+let rouletteAutoTimer = null;
 
 const wheel = [
     { multiplier: 0,    weight: 12 },
@@ -1497,12 +1498,276 @@ function finishHorseRace(raceId) {
     race.racing = false;
     race.activeRace = null;
 }
+
+const ROULETTE_RED_NUMBERS = new Set([
+    1, 3, 5, 7, 9, 12, 14, 16, 18,
+    19, 21, 23, 25, 27, 30, 32, 34, 36
+]);
+
+function getRouletteColor(number) {
+    if (number === 0) return "green";
+    return ROULETTE_RED_NUMBERS.has(number)
+        ? "red"
+        : "black";
+}
+
+function rouletteBetWins(bet, number) {
+    const type = bet.betType;
+
+    if (type === "straight") {
+        return number === Number(bet.selection);
+    }
+
+    if (number === 0) {
+        return false;
+    }
+
+    if (type === "red") {
+        return getRouletteColor(number) === "red";
+    }
+
+    if (type === "black") {
+        return getRouletteColor(number) === "black";
+    }
+
+    if (type === "odd") {
+        return number % 2 === 1;
+    }
+
+    if (type === "even") {
+        return number % 2 === 0;
+    }
+
+    if (type === "low") {
+        return number >= 1 && number <= 18;
+    }
+
+    if (type === "high") {
+        return number >= 19 && number <= 36;
+    }
+
+    if (type === "dozen1") {
+        return number >= 1 && number <= 12;
+    }
+
+    if (type === "dozen2") {
+        return number >= 13 && number <= 24;
+    }
+
+    if (type === "dozen3") {
+        return number >= 25 && number <= 36;
+    }
+
+    if (type === "column1") {
+        return number % 3 === 1;
+    }
+
+    if (type === "column2") {
+        return number % 3 === 2;
+    }
+
+    if (type === "column3") {
+        return number % 3 === 0;
+    }
+
+    return false;
+}
+
+function roulettePayoutMultiplier(type) {
+    if (type === "straight") return 36;
+
+    if (
+        type === "dozen1" ||
+        type === "dozen2" ||
+        type === "dozen3" ||
+        type === "column1" ||
+        type === "column2" ||
+        type === "column3"
+    ) {
+        return 3;
+    }
+
+    return 2;
+}
+
+function publicRouletteState() {
+    return {
+        bets: state.roulette.bets.map(
+            bet => ({ ...bet })
+        ),
+        history: state.roulette.history
+            .slice(0, 30)
+            .map(entry => ({ ...entry })),
+        spinning: state.roulette.spinning,
+        activeSpin: state.roulette.activeSpin,
+        autoStartAt: state.roulette.autoStartAt
+    };
+}
+
+function finishRouletteSpin(spinId) {
+    const roulette = state.roulette;
+    const active = roulette.activeSpin;
+
+    if (
+        !active ||
+        active.spinId !== spinId
+    ) {
+        return;
+    }
+
+    for (const result of active.results) {
+        if (result.payout > 0) {
+            creditChips(
+                result.playerId,
+                result.payout,
+                {
+                    playerName:
+                        result.playerName,
+                    type: "payout",
+                    gameType: "roulette",
+                    note:
+                        `Roulette ${result.betType} win on ${active.winningNumber}`
+                }
+            );
+        }
+    }
+
+    roulette.history.unshift({
+        spinId,
+        winningNumber:
+            active.winningNumber,
+        winningColor:
+            active.winningColor,
+        results:
+            active.results.map(
+                result => ({ ...result })
+            ),
+        createdAt:
+            Date.now()
+    });
+
+    roulette.history =
+        roulette.history.slice(0, 30);
+
+    roulette.bets = [];
+    roulette.spinning = false;
+    roulette.activeSpin = null;
+    roulette.autoStartAt = null;
+    queueChipSave();
+}
+
+function startRouletteSpin() {
+    const roulette = state.roulette;
+
+    if (roulette.spinning) {
+        return {
+            ok: false,
+            error: "Roulette is already spinning"
+        };
+    }
+
+    if (!roulette.bets.length) {
+        return {
+            ok: false,
+            error: "No roulette bets"
+        };
+    }
+
+    const winningNumber =
+        crypto.randomInt(0, 37);
+
+    const winningColor =
+        getRouletteColor(winningNumber);
+
+    const results =
+        roulette.bets.map(bet => {
+            const won =
+                rouletteBetWins(
+                    bet,
+                    winningNumber
+                );
+
+            const multiplier =
+                roulettePayoutMultiplier(
+                    bet.betType
+                );
+
+            const payout =
+                won
+                    ? bet.amount * multiplier
+                    : 0;
+
+            return {
+                ...bet,
+                won,
+                multiplier,
+                payout,
+                profit:
+                    payout - bet.amount
+            };
+        });
+
+    const spinId =
+        crypto.randomBytes(8).toString("hex");
+
+    roulette.spinning = true;
+    roulette.autoStartAt = null;
+    roulette.activeSpin = {
+        spinId,
+        winningNumber,
+        winningColor,
+        startedAt: Date.now(),
+        durationMs: SPIN_DURATION_MS,
+        results
+    };
+
+    setTimeout(
+        () => finishRouletteSpin(spinId),
+        SPIN_DURATION_MS
+    );
+
+    return {
+        ok: true,
+        spin: roulette.activeSpin
+    };
+}
+
+function scheduleRouletteAutoStart() {
+    const roulette = state.roulette;
+
+    if (
+        rouletteAutoTimer ||
+        roulette.spinning ||
+        !roulette.bets.length
+    ) {
+        return;
+    }
+
+    roulette.autoStartAt =
+        Date.now() + AUTO_START_DELAY_MS;
+
+    rouletteAutoTimer = setTimeout(() => {
+        rouletteAutoTimer = null;
+        roulette.autoStartAt = null;
+
+        if (
+            roulette.spinning ||
+            !roulette.bets.length
+        ) {
+            return;
+        }
+
+        startRouletteSpin();
+    }, AUTO_START_DELAY_MS);
+}
+
 function publicState() {
     return {
         chips: publicChipState(),
         slots: publicSlotsState(),
         mines: publicMinesState(),
         deal: publicDealState(),
+        roulette: publicRouletteState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -1957,6 +2222,12 @@ app.post("/chips/reset-all", (req, res) => {
     state.deal.games = {};
     state.deal.history = [];
 
+    state.roulette.bets = [];
+    state.roulette.history = [];
+    state.roulette.spinning = false;
+    state.roulette.activeSpin = null;
+    state.roulette.autoStartAt = null;
+
     state.wheel.bets = [];
     state.wheel.history = [];
     state.wheel.spinning = false;
@@ -2389,6 +2660,176 @@ app.post("/slots/spin", (req, res) => {
     });
 });
 
+
+// Roulette routes
+
+app.post("/roulette/place-bet", (req, res) => {
+    const roulette = state.roulette;
+
+    if (roulette.spinning) {
+        return res.status(409).json({
+            ok: false,
+            error: "Roulette spin already running"
+        });
+    }
+
+    const playerId =
+        cleanPlayerId(req.body?.playerId);
+
+    const playerName =
+        cleanPlayerName(req.body?.playerName);
+
+    const amount =
+        cleanAmount(req.body?.amount);
+
+    const betType =
+        String(req.body?.betType || "").trim();
+
+    const selection =
+        req.body?.selection;
+
+    const validTypes = new Set([
+        "straight",
+        "red",
+        "black",
+        "odd",
+        "even",
+        "low",
+        "high",
+        "dozen1",
+        "dozen2",
+        "dozen3",
+        "column1",
+        "column2",
+        "column3"
+    ]);
+
+    if (
+        !playerId ||
+        !playerName ||
+        !amount ||
+        !validTypes.has(betType)
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid roulette bet"
+        });
+    }
+
+    if (
+        betType === "straight" &&
+        (
+            !Number.isInteger(Number(selection)) ||
+            Number(selection) < 0 ||
+            Number(selection) > 36
+        )
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Choose a number from 0 to 36"
+        });
+    }
+
+    const debit = debitChips(
+        playerId,
+        amount,
+        {
+            playerName,
+            type: "bet",
+            gameType: "roulette",
+            note:
+                betType === "straight"
+                    ? `Roulette number ${selection}`
+                    : `Roulette ${betType}`
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    roulette.bets.push({
+        betId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        amount,
+        betType,
+        selection:
+            betType === "straight"
+                ? Number(selection)
+                : String(selection || betType),
+        createdAt:
+            Date.now()
+    });
+
+    scheduleRouletteAutoStart();
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        balance:
+            getChipBalance(playerId),
+        state:
+            publicState()
+    });
+});
+
+app.post("/roulette/clear-my-bets", (req, res) => {
+    const roulette = state.roulette;
+    const playerId =
+        cleanPlayerId(req.body?.playerId);
+
+    if (roulette.spinning) {
+        return res.status(409).json({
+            ok: false,
+            error: "Cannot clear bets during a spin"
+        });
+    }
+
+    const mine = roulette.bets.filter(
+        bet => bet.playerId === playerId
+    );
+
+    if (!mine.length) {
+        return res.status(404).json({
+            ok: false,
+            error: "No roulette bets to clear"
+        });
+    }
+
+    refundBets(
+        mine,
+        "roulette",
+        "Roulette bets cleared"
+    );
+
+    roulette.bets =
+        roulette.bets.filter(
+            bet => bet.playerId !== playerId
+        );
+
+    if (!roulette.bets.length) {
+        roulette.autoStartAt = null;
+
+        if (rouletteAutoTimer) {
+            clearTimeout(
+                rouletteAutoTimer
+            );
+            rouletteAutoTimer = null;
+        }
+    }
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        balance:
+            getChipBalance(playerId),
+        state:
+            publicState()
+    });
+});
 
 // Deal game routes
 
