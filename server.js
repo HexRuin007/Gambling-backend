@@ -13,7 +13,7 @@ const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
 // Free spins must stay limited because they can award more free spins.
-const SLOT_FREE_SPINS_AWARD = { 3: 1, 4: 2, 5: 3 };
+const SLOT_FREE_SPINS_AWARD = { 3: 3, 4: 5, 5: 8 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
 const MINES_MAX_COUNT = 24;
@@ -2011,12 +2011,23 @@ app.post("/slots/spin", (req, res) => {
             Math.max(0, Number(state.slots.freeSpins[playerId] || 0)) + evaluation.freeSpinsAwarded;
     }
 
-    if (evaluation.payout > 0) {
-        creditChips(playerId, evaluation.payout, {
+    const creditedPayout =
+        evaluation.payout > 0
+            ? (
+                isFreeSpin
+                    ? evaluation.payout
+                    : evaluation.payout + betAmount
+            )
+            : 0;
+
+    if (creditedPayout > 0) {
+        creditChips(playerId, creditedPayout, {
             playerName,
             type: "payout",
             gameType: "slots",
-            note: isFreeSpin ? "Slot free-spin winnings" : "Slot winnings"
+            note: isFreeSpin
+                ? "Slot free-spin winnings"
+                : "Slot winnings plus original bet returned"
         });
     }
 
@@ -2030,8 +2041,15 @@ app.post("/slots/spin", (req, res) => {
         scatterNudgeSteps: nudgeFeature.steps,
         scatterNudgeAttempts: nudgeFeature.steps.length,
         betAmount,
-        payout: evaluation.payout,
-        profit: evaluation.payout - (isFreeSpin ? 0 : betAmount),
+        payout: creditedPayout,
+        winAmount: evaluation.payout,
+        stakeReturned:
+            !isFreeSpin && evaluation.payout > 0
+                ? betAmount
+                : 0,
+        profit:
+            creditedPayout -
+            (isFreeSpin ? 0 : betAmount),
         freeSpin: isFreeSpin,
         freeSpinsAwarded: evaluation.freeSpinsAwarded,
         freeSpinsRemaining: state.slots.freeSpins[playerId] || 0,
