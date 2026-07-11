@@ -1861,10 +1861,14 @@ function scheduleRouletteAutoStart() {
 }
 
 
-const CRASH_GROWTH_RATE = 0.18;
+// Slower curve so the multiplier visibly climbs and players
+// have a real opportunity to cash out.
+const CRASH_GROWTH_RATE = 0.12;
 const CRASH_HOUSE_FACTOR = 0.97;
 const CRASH_MAX_MULTIPLIER = 100;
-const CRASH_MIN_MULTIPLIER = 1.01;
+
+// At the current growth rate, x1.35 takes about 2.5 seconds.
+const CRASH_MIN_MULTIPLIER = 1.35;
 
 function ensureCrashState() {
     if (!state.crash || typeof state.crash !== "object") {
@@ -3271,6 +3275,7 @@ app.post("/crash/start", (req, res) => {
 
     res.json({
         ok: true,
+        serverTime: Date.now(),
         game: publicCrashGame(game),
         balance: getChipBalance(playerId),
         state: publicState()
@@ -3342,6 +3347,7 @@ app.post("/crash/cashout", (req, res) => {
 
     res.json({
         ok: true,
+        serverTime: Date.now(),
         multiplier,
         payout,
         balance: getChipBalance(playerId),
