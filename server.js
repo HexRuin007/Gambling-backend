@@ -2598,6 +2598,12 @@ app.post("/deal/accept", (req, res) => {
 
     const payout = game.currentOffer;
 
+    // Preserve the hidden case layout before finishDealGame removes
+    // the active game. This is only returned after the player accepts.
+    const allCaseValues = [...game.caseValues];
+    const chosenCase = game.chosenCase;
+    const chosenValue = game.caseValues[chosenCase];
+
     creditChips(
         playerId,
         payout,
@@ -2618,6 +2624,9 @@ app.post("/deal/accept", (req, res) => {
     res.json({
         ok: true,
         payout,
+        chosenCase,
+        chosenValue,
+        allCaseValues,
         history,
         balance: getChipBalance(playerId),
         state: publicState()
