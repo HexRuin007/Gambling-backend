@@ -3355,6 +3355,84 @@ app.post("/crash/cashout", (req, res) => {
     });
 });
 
+app.get("/crash/status", (req, res) => {
+    const crash = ensureCrashState();
+
+    const playerId =
+        cleanPlayerId(req.query?.playerId);
+
+    const game =
+        crash.games[playerId] || null;
+
+    if (!game || game.status !== "running") {
+        const latest = crash.history.find(
+            entry =>
+                entry.playerId === playerId
+        ) || null;
+
+        return res.json({
+            ok: true,
+            serverTime: Date.now(),
+            running: false,
+            latestResult: latest
+                ? {
+                    gameId: latest.gameId,
+                    result: latest.result,
+                    crashPoint:
+                        latest.crashPoint,
+                    cashoutMultiplier:
+                        latest.cashoutMultiplier,
+                    payout: latest.payout,
+                    profit: latest.profit,
+                    createdAt: latest.createdAt
+                }
+                : null
+        });
+    }
+
+    const multiplier =
+        getCrashMultiplier(game);
+
+    // Close the game here too if the timeout callback is delayed.
+    if (multiplier >= game.crashPoint) {
+        finishSoloCrashGame(
+            game,
+            "crashed",
+            0,
+            null
+        );
+
+        return res.json({
+            ok: true,
+            serverTime: Date.now(),
+            running: false,
+            latestResult: {
+                gameId: game.gameId,
+                result: "crashed",
+                crashPoint:
+                    game.crashPoint,
+                cashoutMultiplier: null,
+                payout: 0,
+                profit:
+                    -game.betAmount,
+                createdAt: Date.now()
+            }
+        });
+    }
+
+    res.json({
+        ok: true,
+        serverTime: Date.now(),
+        running: true,
+        gameId: game.gameId,
+        multiplier,
+        betAmount: game.betAmount,
+        startedAt: game.startedAt,
+        growthRate:
+            CRASH_GROWTH_RATE
+    });
+});
+
 // Deal game routes
 
 
