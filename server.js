@@ -6,6 +6,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
+const CHIP_RESET_OWNER_ID = "229051";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
@@ -1690,6 +1691,85 @@ app.get("/chips/daily-profit", (req, res) => {
         ok: true,
         timezone: "UTC",
         stats
+    });
+});
+
+app.post("/chips/reset-all", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const requesterId = cleanPlayerId(req.body?.requesterId);
+    const confirmation = String(req.body?.confirmation || "").trim();
+
+    if (requesterId !== CHIP_RESET_OWNER_ID) {
+        return res.status(403).json({
+            ok: false,
+            error: "Only user ID 229051 can reset all chips"
+        });
+    }
+
+    if (confirmation !== "RESET ALL CHIPS") {
+        return res.status(400).json({
+            ok: false,
+            error: 'Type "RESET ALL CHIPS" to confirm'
+        });
+    }
+
+    const previousPlayerCount = Object.keys(
+        state.chips.balances
+    ).length;
+
+    const previousTotalChips = Object.values(
+        state.chips.balances
+    ).reduce(
+        (sum, value) =>
+            sum + Math.max(
+                0,
+                Math.floor(Number(value || 0))
+            ),
+        0
+    );
+
+    state.chips.balances = {};
+    state.chips.requests = [];
+    state.chips.transactions = [];
+    state.chips.dailyHouseStats = {};
+
+    state.slots.freeSpins = {};
+    state.slots.lastPaidBet = {};
+    state.slots.history = [];
+
+    state.mines.games = {};
+    state.mines.history = [];
+
+    state.wheel.bets = [];
+    state.wheel.history = [];
+    state.wheel.spinning = false;
+    state.wheel.activeSpin = null;
+    state.wheel.autoStartAt = null;
+
+    state.blackjack.bets = [];
+    state.blackjack.players = [];
+    state.blackjack.dealerHand = [];
+    state.blackjack.deck = [];
+    state.blackjack.status = "waiting";
+    state.blackjack.currentTurnIndex = 0;
+    state.blackjack.history = [];
+    state.blackjack.autoStartAt = null;
+
+    state.racing.bets = [];
+    state.racing.history = [];
+    state.racing.racing = false;
+    state.racing.activeRace = null;
+    state.racing.autoStartAt = null;
+
+    saveChipDataImmediately();
+
+    res.json({
+        ok: true,
+        resetBy: requesterId,
+        previousPlayerCount,
+        previousTotalChips,
+        state: publicState()
     });
 });
 
