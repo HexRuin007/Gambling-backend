@@ -3310,6 +3310,154 @@ app.post("/discord/chips/deny", (req, res) => {
     });
 });
 
+app.post(
+    "/discord/chips/withdrawal-complete",
+    (req, res) => {
+        if (!requireDiscordBot(req, res)) return;
+
+        const withdrawalRequestId = String(
+            req.body?.withdrawalRequestId || ""
+        ).trim();
+
+        const discordUserId = String(
+            req.body?.discordUserId || ""
+        ).trim();
+
+        const discordDisplayName = String(
+            req.body?.discordDisplayName ||
+            "Discord banker"
+        ).trim().slice(0, 80);
+
+        const request =
+            state.chips.withdrawalRequests.find(
+                item =>
+                    item.withdrawalRequestId ===
+                        withdrawalRequestId &&
+                    item.status === "pending"
+            );
+
+        if (!request) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Withdrawal request not found or already handled"
+            });
+        }
+
+        const currentBalance =
+            getChipBalance(request.playerId);
+
+        if (currentBalance < request.amount) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    `Player only has ${currentBalance} chips`
+            });
+        }
+
+        const removed = debitChips(
+            request.playerId,
+            request.amount,
+            {
+                playerName: request.playerName,
+                type: "cashout",
+                gameType: "",
+                note:
+                    `Discord withdrawal completed by ` +
+                    `${discordDisplayName} ` +
+                    `(${discordUserId || "unknown"})`
+            }
+        );
+
+        if (!removed.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: removed.error
+            });
+        }
+
+        request.status = "completed";
+        request.completedAt = Date.now();
+        request.amountCompleted =
+            request.amount;
+        request.handledBy =
+            discordDisplayName;
+        request.handledByDiscordId =
+            discordUserId || null;
+
+        queueChipSave();
+
+        res.json({
+            ok: true,
+            action: "completed",
+            withdrawalRequestId,
+            playerId: request.playerId,
+            playerName: request.playerName,
+            amountRemoved: request.amount,
+            previousBalance:
+                currentBalance,
+            newBalance:
+                getChipBalance(request.playerId)
+        });
+    }
+);
+
+app.post(
+    "/discord/chips/withdrawal-deny",
+    (req, res) => {
+        if (!requireDiscordBot(req, res)) return;
+
+        const withdrawalRequestId = String(
+            req.body?.withdrawalRequestId || ""
+        ).trim();
+
+        const discordUserId = String(
+            req.body?.discordUserId || ""
+        ).trim();
+
+        const discordDisplayName = String(
+            req.body?.discordDisplayName ||
+            "Discord banker"
+        ).trim().slice(0, 80);
+
+        const request =
+            state.chips.withdrawalRequests.find(
+                item =>
+                    item.withdrawalRequestId ===
+                        withdrawalRequestId &&
+                    item.status === "pending"
+            );
+
+        if (!request) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Withdrawal request not found or already handled"
+            });
+        }
+
+        request.status = "denied";
+        request.deniedAt = Date.now();
+        request.handledBy =
+            discordDisplayName;
+        request.handledByDiscordId =
+            discordUserId || null;
+
+        queueChipSave();
+
+        res.json({
+            ok: true,
+            action: "denied",
+            withdrawalRequestId,
+            playerId: request.playerId,
+            playerName: request.playerName,
+            amount: request.amount,
+            currentBalance:
+                getChipBalance(request.playerId)
+        });
+    }
+);
+
 // Slot routes
 app.post("/slots/spin", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
