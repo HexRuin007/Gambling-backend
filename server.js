@@ -122,7 +122,7 @@ racing: {
         { id: "Nunu", name: "Nunu Royale" },
         { id: "Pxpe", name: "Pxpe Express" },
         { id: "Crack", name: "WhipCrack" },
-        { id: "rocket", name: "Sandy Rocket" },
+        { id: "Beans", name: "Jelly Queen" },
         { id: "nipple", name: "Zitze Nipple" },
         { id: "famil", name: "Uncle Famil" }
     ],
