@@ -1100,7 +1100,7 @@ function runScatterNudgeFeature(initialGrid) {
     };
 }
 
-function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
+function evaluateSlotGrid(grid, betAmount) {
     let payout = 0;
     const lineWins = [];
     const winningCells = [];
@@ -1134,13 +1134,12 @@ function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
         freeSpinsAwarded = SLOT_FREE_SPINS_AWARD[count] || 0;
     }
 
-    // A paid spin that is shown as a winning payline should never return
-    // less than the original stake. This prevents "winning" while still
-    // losing chips overall.
+    // Paid and free spins use exactly the same win calculation.
+    // Any displayed win returns at least the stake value, and the route
+    // adds the stake back to produce the same gross payout as a paid spin.
     let minimumWinApplied = false;
 
     if (
-        !isFreeSpin &&
         (lineWins.length > 0 || scatterCount >= 3) &&
         payout < betAmount
     ) {
@@ -1148,24 +1147,7 @@ function evaluateSlotGrid(grid, betAmount, isFreeSpin) {
         minimumWinApplied = true;
     }
 
-    let bonusMultiplier = 1;
-
-    if (isFreeSpin && payout > 0) {
-        const bonusRoll = crypto.randomInt(1, 101);
-
-        // Most free-spin wins pay normally. Larger multipliers are rare.
-        // This prevents the free-spin feature from creating an RTP above 100%.
-        bonusMultiplier =
-            bonusRoll <= 1
-                ? 5
-                : bonusRoll <= 5
-                    ? 3
-                    : bonusRoll <= 15
-                        ? 2
-                        : 1;
-
-        payout *= bonusMultiplier;
-    }
+    const bonusMultiplier = 1;
 
     return {
         payout: Math.floor(payout),
@@ -3499,8 +3481,7 @@ app.post("/slots/spin", (req, res) => {
     const grid = nudgeFeature.finalGrid;
     const evaluation = evaluateSlotGrid(
         grid,
-        betAmount,
-        isFreeSpin
+        betAmount
     );
 
     if (evaluation.freeSpinsAwarded > 0) {
@@ -3508,13 +3489,11 @@ app.post("/slots/spin", (req, res) => {
             Math.max(0, Number(state.slots.freeSpins[playerId] || 0)) + evaluation.freeSpinsAwarded;
     }
 
+    // Free spins are not charged, but they gamble the triggering paid-spin
+    // stake and receive the exact same gross payout as a paid spin.
     const creditedPayout =
         evaluation.payout > 0
-            ? (
-                isFreeSpin
-                    ? evaluation.payout
-                    : evaluation.payout + betAmount
-            )
+            ? evaluation.payout + betAmount
             : 0;
 
     if (creditedPayout > 0) {
@@ -3523,7 +3502,7 @@ app.post("/slots/spin", (req, res) => {
             type: "payout",
             gameType: "slots",
             note: isFreeSpin
-                ? "Slot free-spin winnings"
+                ? "Slot free-spin winnings plus original bet value returned"
                 : "Slot winnings plus original bet returned"
         });
     }
@@ -3541,7 +3520,7 @@ app.post("/slots/spin", (req, res) => {
         payout: creditedPayout,
         winAmount: evaluation.payout,
         stakeReturned:
-            !isFreeSpin && evaluation.payout > 0
+            evaluation.payout > 0
                 ? betAmount
                 : 0,
         profit:
@@ -3561,11 +3540,9 @@ app.post("/slots/spin", (req, res) => {
                 : `${evaluation.scatterCount} scatters awarded ${evaluation.freeSpinsAwarded} free spins!`
             : nudgeFeature.triggered
                 ? `Scatter nudge used ${nudgeFeature.steps.length} free respin${nudgeFeature.steps.length === 1 ? "" : "s"}, but no third scatter landed`
-                : evaluation.bonusMultiplier > 1
-                    ? `Free-spin bonus multiplier x${evaluation.bonusMultiplier}`
-                    : evaluation.lineWins.length
-                        ? `${evaluation.lineWins.length} winning payline${evaluation.lineWins.length === 1 ? "" : "s"}`
-                        : "No winning combination",
+                : evaluation.lineWins.length
+                    ? `${evaluation.lineWins.length} winning payline${evaluation.lineWins.length === 1 ? "" : "s"}`
+                    : "No winning combination",
         createdAt: Date.now()
     };
 
