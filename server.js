@@ -65,6 +65,8 @@ const state = {
         balances: {},
         playerNames: {},
         requests: [],
+        withdrawalRequests: [],
+        discordEvents: [],
         transactions: [],
         dailyHouseStats: {},
         leaderboardStats: {}
@@ -168,6 +170,16 @@ function loadChipData() {
 
         if (Array.isArray(saved.requests)) {
             state.chips.requests = saved.requests;
+        }
+
+        if (Array.isArray(saved.withdrawalRequests)) {
+            state.chips.withdrawalRequests =
+                saved.withdrawalRequests.slice(0, 200);
+        }
+
+        if (Array.isArray(saved.discordEvents)) {
+            state.chips.discordEvents =
+                saved.discordEvents.slice(0, 500);
         }
 
         if (Array.isArray(saved.transactions)) {
@@ -279,6 +291,10 @@ function saveChipDataImmediately() {
             balances: state.chips.balances,
             playerNames: state.chips.playerNames,
             requests: state.chips.requests,
+            withdrawalRequests:
+                state.chips.withdrawalRequests,
+            discordEvents:
+                state.chips.discordEvents,
             transactions: state.chips.transactions,
             dailyHouseStats: state.chips.dailyHouseStats,
             leaderboardStats: state.chips.leaderboardStats,
@@ -871,6 +887,24 @@ function refundBets(bets, gameType, note) {
     }
 }
 
+function addDiscordEvent(type, data = {}) {
+    const event = {
+        eventId:
+            crypto.randomBytes(8).toString("hex"),
+        type: String(type || "event"),
+        postedAt: null,
+        createdAt: Date.now(),
+        ...data
+    };
+
+    state.chips.discordEvents.unshift(event);
+    state.chips.discordEvents =
+        state.chips.discordEvents.slice(0, 500);
+
+    queueChipSave();
+    return event;
+}
+
 function publicChipState() {
     return {
         balances: {
@@ -884,6 +918,13 @@ function publicChipState() {
         requests: state.chips.requests.map(
             request => ({ ...request })
         ),
+
+        withdrawalRequests:
+            state.chips.withdrawalRequests
+                .filter(request =>
+                    request.status === "pending"
+                )
+                .map(request => ({ ...request })),
 
         transactions: state.chips.transactions
             .slice(0, 50)
@@ -2602,6 +2643,8 @@ app.post("/chips/reset-all", (req, res) => {
 
     state.chips.balances = {};
     state.chips.requests = [];
+    state.chips.withdrawalRequests = [];
+    state.chips.discordEvents = [];
     state.chips.transactions = [];
     state.chips.dailyHouseStats = {};
     state.chips.leaderboardStats = {};
@@ -2800,6 +2843,19 @@ app.post("/chips/grant", (req, res) => {
         queueChipSave();
     }
 
+    addDiscordEvent("banker-grant", {
+        playerId,
+        playerName,
+        amount,
+        newBalance: getChipBalance(playerId),
+        source:
+            request
+                ? "approved-request"
+                : "manual-grant",
+        requestId:
+            request?.requestId || null
+    });
+
     res.json({
         ok: true,
         playerId,
@@ -2807,6 +2863,108 @@ app.post("/chips/grant", (req, res) => {
         state: publicState()
     });
 });
+app.post("/chips/withdraw-request", (req, res) => {
+    const playerId = cleanPlayerId(
+        req.body?.playerId
+    );
+
+    const playerName = cleanPlayerName(
+        req.body?.playerName ||
+        state.chips.playerNames[playerId] ||
+        "Player"
+    );
+
+    const amount = cleanAmount(
+        req.body?.amount
+    );
+
+    if (!playerId || !playerName || !amount) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid withdrawal request"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const currentBalance =
+        getChipBalance(playerId);
+
+    if (currentBalance < amount) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                `You only have ${currentBalance} chips`
+        });
+    }
+
+    const existing =
+        state.chips.withdrawalRequests.find(
+            request =>
+                request.playerId === playerId &&
+                request.status === "pending"
+        );
+
+    if (existing) {
+        existing.amount = amount;
+        existing.playerName = playerName;
+        existing.currentBalance =
+            currentBalance;
+        existing.updatedAt = Date.now();
+
+        addDiscordEvent("withdrawal-request", {
+            withdrawalRequestId:
+                existing.withdrawalRequestId,
+            playerId,
+            playerName,
+            amount,
+            currentBalance,
+            updated: true
+        });
+
+        queueChipSave();
+
+        return res.json({
+            ok: true,
+            request: existing,
+            state: publicState()
+        });
+    }
+
+    const request = {
+        withdrawalRequestId:
+            crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        amount,
+        currentBalance,
+        status: "pending",
+        createdAt: Date.now()
+    };
+
+    state.chips.withdrawalRequests.push(
+        request
+    );
+
+    addDiscordEvent("withdrawal-request", {
+        withdrawalRequestId:
+            request.withdrawalRequestId,
+        playerId,
+        playerName,
+        amount,
+        currentBalance,
+        updated: false
+    });
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        request,
+        state: publicState()
+    });
+});
+
 app.post("/chips/cashout", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
@@ -2853,6 +3011,30 @@ app.post("/chips/cashout", (req, res) => {
             error: removed.error
         });
     }
+
+    const matchingWithdrawal =
+        state.chips.withdrawalRequests.find(
+            request =>
+                request.playerId === playerId &&
+                request.status === "pending"
+        );
+
+    if (matchingWithdrawal) {
+        matchingWithdrawal.status = "completed";
+        matchingWithdrawal.completedAt = Date.now();
+        matchingWithdrawal.amountCompleted = amount;
+    }
+
+    addDiscordEvent("withdrawal-completed", {
+        withdrawalRequestId:
+            matchingWithdrawal?.withdrawalRequestId ||
+            null,
+        playerId,
+        playerName,
+        amount,
+        previousBalance: currentBalance,
+        newBalance: getChipBalance(playerId)
+    });
 
     res.json({
         ok: true,
@@ -2947,6 +3129,53 @@ app.post("/chips/set-balance", (req, res) => {
 
 // Discord bot chip-request routes
 
+app.get("/discord/chips/events", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    res.json({
+        ok: true,
+        events: state.chips.discordEvents
+            .filter(event => !event.postedAt)
+            .slice()
+            .reverse()
+            .slice(0, 100)
+            .map(event => ({ ...event }))
+    });
+});
+
+app.post("/discord/chips/event-ack", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const eventId = String(
+        req.body?.eventId || ""
+    ).trim();
+
+    const event =
+        state.chips.discordEvents.find(
+            item => item.eventId === eventId
+        );
+
+    if (!event) {
+        return res.status(404).json({
+            ok: false,
+            error: "Discord event not found"
+        });
+    }
+
+    event.postedAt = Date.now();
+    event.discordMessageId = String(
+        req.body?.discordMessageId || ""
+    ).trim() || null;
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        eventId,
+        postedAt: event.postedAt
+    });
+});
+
 app.get("/discord/chips/requests", (req, res) => {
     if (!requireDiscordBot(req, res)) return;
 
@@ -3015,6 +3244,19 @@ app.post("/discord/chips/approve", (req, res) => {
             item =>
                 item.requestId !== requestId
         );
+
+    addDiscordEvent("banker-grant", {
+        playerId: request.playerId,
+        playerName: request.playerName,
+        amount: request.amount,
+        newBalance:
+            getChipBalance(request.playerId),
+        source: "discord-approved-request",
+        requestId,
+        handledBy: discordDisplayName,
+        handledByDiscordId:
+            discordUserId || null
+    });
 
     queueChipSave();
 
