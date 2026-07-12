@@ -2046,7 +2046,10 @@ function chickenMultiplierForStep(
         CHICKEN_RISKS[riskKey] ||
         CHICKEN_RISKS.medium;
 
-    if (step <= 0) return 1;
+    if (step <= 1) return 1;
+
+    const riskySteps =
+        step - 1;
 
     return Math.max(
         1,
@@ -2055,7 +2058,7 @@ function chickenMultiplierForStep(
                 CHICKEN_HOUSE_FACTOR /
                 Math.pow(
                     risk.survivalChance,
-                    step
+                    riskySteps
                 )
             ) * 100
         ) / 100
@@ -3453,11 +3456,20 @@ app.post("/chicken/cross", (req, res) => {
         CHICKEN_RISKS[game.risk] ||
         CHICKEN_RISKS.medium;
 
+    // The first lane is always safe so a newly started game
+    // cannot immediately end on the player's first crossing.
+    // Risk begins from the second lane onward.
+    const isFirstCross =
+        game.currentStep === 0;
+
     const roll =
         crypto.randomInt(0, 1_000_000) /
         1_000_000;
 
-    if (roll >= risk.survivalChance) {
+    if (
+        !isFirstCross &&
+        roll >= risk.survivalChance
+    ) {
         const failedAtStep =
             game.currentStep + 1;
 
