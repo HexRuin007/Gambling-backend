@@ -93,7 +93,7 @@ const state = {
         autoStartAt: null
     },
 
-    crash: {
+    chicken: {
         games: {},
         history: []
     },
@@ -245,12 +245,12 @@ function loadChipData() {
         }
 
         if (
-            saved.crash &&
-            typeof saved.crash === "object" &&
-            Array.isArray(saved.crash.history)
+            saved.chicken &&
+            typeof saved.chicken === "object" &&
+            Array.isArray(saved.chicken.history)
         ) {
-            state.crash.history =
-                saved.crash.history.slice(0, 50);
+            state.chicken.history =
+                saved.chicken.history.slice(0, 50);
         }
 
         console.log(
@@ -299,8 +299,8 @@ function saveChipDataImmediately() {
                 bets: state.roulette.bets,
                 history: state.roulette.history
             },
-            crash: {
-                history: state.crash.history
+            chicken: {
+                history: state.chicken.history
             },
             savedAt: Date.now()
         };
@@ -1995,71 +1995,74 @@ function scheduleRouletteAutoStart() {
 
 // Slower curve so the multiplier visibly climbs and players
 // have a real opportunity to cash out.
-const CRASH_GROWTH_RATE = 0.12;
-const CRASH_HOUSE_FACTOR = 0.97;
-const CRASH_MAX_MULTIPLIER = 100;
+const CHICKEN_MAX_STEPS = 12;
+const CHICKEN_HOUSE_FACTOR = 0.97;
+const CHICKEN_MAX_HISTORY = 50;
+const CHICKEN_RISKS = {
+    easy: {
+        label: "Easy",
+        survivalChance: 0.88
+    },
+    medium: {
+        label: "Medium",
+        survivalChance: 0.78
+    },
+    hard: {
+        label: "Hard",
+        survivalChance: 0.68
+    }
+};
 
-// At the current growth rate, x1.35 takes about 2.5 seconds.
-const CRASH_MIN_MULTIPLIER = 1.35;
-
-function ensureCrashState() {
-    if (!state.crash || typeof state.crash !== "object") {
-        state.crash = {
+function ensureChickenState() {
+    if (
+        !state.chicken ||
+        typeof state.chicken !== "object"
+    ) {
+        state.chicken = {
             games: {},
             history: []
         };
     }
 
     if (
-        !state.crash.games ||
-        typeof state.crash.games !== "object"
+        !state.chicken.games ||
+        typeof state.chicken.games !== "object"
     ) {
-        state.crash.games = {};
+        state.chicken.games = {};
     }
 
-    if (!Array.isArray(state.crash.history)) {
-        state.crash.history = [];
+    if (!Array.isArray(state.chicken.history)) {
+        state.chicken.history = [];
     }
 
-    return state.crash;
+    return state.chicken;
 }
 
-function pickCrashPoint() {
-    const random =
-        crypto.randomInt(1, 1_000_001) / 1_000_001;
+function chickenMultiplierForStep(
+    step,
+    riskKey
+) {
+    const risk =
+        CHICKEN_RISKS[riskKey] ||
+        CHICKEN_RISKS.medium;
 
-    return Math.min(
-        CRASH_MAX_MULTIPLIER,
-        Math.max(
-            CRASH_MIN_MULTIPLIER,
-            Math.floor(
-                (CRASH_HOUSE_FACTOR / random) * 100
-            ) / 100
-        )
-    );
-}
-
-function getCrashMultiplier(game, now = Date.now()) {
-    if (!game || game.status !== "running") {
-        return 1;
-    }
-
-    const elapsedSeconds = Math.max(
-        0,
-        (now - game.startedAt) / 1000
-    );
+    if (step <= 0) return 1;
 
     return Math.max(
         1,
         Math.floor(
-            Math.exp(
-                CRASH_GROWTH_RATE * elapsedSeconds
+            (
+                CHICKEN_HOUSE_FACTOR /
+                Math.pow(
+                    risk.survivalChance,
+                    step
+                )
             ) * 100
         ) / 100
     );
 }
 
-function publicCrashGame(game) {
+function publicChickenGame(game) {
     if (!game) return null;
 
     return {
@@ -2067,87 +2070,84 @@ function publicCrashGame(game) {
         playerId: game.playerId,
         playerName: game.playerName,
         betAmount: game.betAmount,
-        startedAt: game.startedAt,
-        growthRate: CRASH_GROWTH_RATE,
-        status: game.status
+        risk: game.risk,
+        riskLabel:
+            CHICKEN_RISKS[game.risk]?.label ||
+            "Medium",
+        currentStep: game.currentStep,
+        multiplier:
+            chickenMultiplierForStep(
+                game.currentStep,
+                game.risk
+            ),
+        maxSteps: CHICKEN_MAX_STEPS,
+        status: game.status,
+        startedAt: game.startedAt
     };
 }
 
-function publicCrashState() {
-    const crash = ensureCrashState();
+function publicChickenState() {
+    const chicken = ensureChickenState();
     const games = {};
 
     for (const [playerId, game] of Object.entries(
-        crash.games
+        chicken.games
     )) {
         games[playerId] =
-            publicCrashGame(game);
+            publicChickenGame(game);
     }
 
     return {
         games,
-        history: crash.history
+        history: chicken.history
             .slice(0, 30)
-            .map(entry => ({ ...entry }))
+            .map(entry => ({ ...entry })),
+        maxSteps: CHICKEN_MAX_STEPS,
+        risks: Object.fromEntries(
+            Object.entries(CHICKEN_RISKS).map(
+                ([key, risk]) => [
+                    key,
+                    {
+                        label: risk.label,
+                        survivalChance:
+                            risk.survivalChance
+                    }
+                ]
+            )
+        )
     };
 }
 
-function finishSoloCrashGame(
+function finishChickenGame(
     game,
     result,
     payout,
-    cashoutMultiplier = null
+    multiplier
 ) {
-    const crash = ensureCrashState();
+    const chicken = ensureChickenState();
 
-    crash.history.unshift({
+    chicken.history.unshift({
         gameId: game.gameId,
         playerId: game.playerId,
         playerName: game.playerName,
         betAmount: game.betAmount,
-        crashPoint: game.crashPoint,
+        risk: game.risk,
+        stepsCrossed: game.currentStep,
         result,
-        cashoutMultiplier,
+        multiplier,
         payout,
         profit: payout - game.betAmount,
         createdAt: Date.now()
     });
 
-    crash.history =
-        crash.history.slice(0, 50);
-
-    delete crash.games[game.playerId];
-    queueChipSave();
-}
-
-function scheduleSoloCrash(game) {
-    const durationMs = Math.max(
-        50,
-        Math.log(game.crashPoint) /
-            CRASH_GROWTH_RATE *
-            1000
-    );
-
-    setTimeout(() => {
-        const crash = ensureCrashState();
-        const active =
-            crash.games[game.playerId];
-
-        if (
-            !active ||
-            active.gameId !== game.gameId ||
-            active.status !== "running"
-        ) {
-            return;
-        }
-
-        finishSoloCrashGame(
-            active,
-            "crashed",
+    chicken.history =
+        chicken.history.slice(
             0,
-            null
+            CHICKEN_MAX_HISTORY
         );
-    }, durationMs);
+
+    delete chicken.games[game.playerId];
+    queueChipSave();
 }
 
 function publicState() {
@@ -2157,7 +2157,7 @@ function publicState() {
         mines: publicMinesState(),
         deal: publicDealState(),
         roulette: publicRouletteState(),
-        crash: publicCrashState(),
+        chicken: publicChickenState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -2619,8 +2619,8 @@ app.post("/chips/reset-all", (req, res) => {
     state.roulette.activeSpin = null;
     state.roulette.autoStartAt = null;
 
-    state.crash.games = {};
-    state.crash.history = [];
+    state.chicken.games = {};
+    state.chicken.history = [];
 
     state.wheel.bets = [];
     state.wheel.history = [];
@@ -3359,10 +3359,10 @@ app.post("/roulette/clear-my-bets", (req, res) => {
     });
 });
 
-// Crash routes
+// Chicken Crossing routes
 
-app.post("/crash/start", (req, res) => {
-    const crash = ensureCrashState();
+app.post("/chicken/start", (req, res) => {
+    const chicken = ensureChickenState();
 
     const playerId =
         cleanPlayerId(req.body?.playerId);
@@ -3373,17 +3373,26 @@ app.post("/crash/start", (req, res) => {
     const amount =
         cleanAmount(req.body?.amount);
 
-    if (!playerId || !playerName || !amount) {
+    const risk = String(
+        req.body?.risk || "medium"
+    ).toLowerCase();
+
+    if (
+        !playerId ||
+        !playerName ||
+        !amount ||
+        !CHICKEN_RISKS[risk]
+    ) {
         return res.status(400).json({
             ok: false,
-            error: "Invalid crash bet"
+            error: "Invalid chicken game settings"
         });
     }
 
-    if (crash.games[playerId]) {
+    if (chicken.games[playerId]) {
         return res.status(409).json({
             ok: false,
-            error: "Finish your current Crash game first"
+            error: "Finish your current chicken game first"
         });
     }
 
@@ -3393,8 +3402,8 @@ app.post("/crash/start", (req, res) => {
         {
             playerName,
             type: "bet",
-            gameType: "crash",
-            note: "Solo Crash bet"
+            gameType: "chicken",
+            note: `Chicken Crossing ${risk} bet`
         }
     );
 
@@ -3408,56 +3417,157 @@ app.post("/crash/start", (req, res) => {
         playerId,
         playerName,
         betAmount: amount,
-        crashPoint: pickCrashPoint(),
-        startedAt: Date.now(),
-        status: "running"
+        risk,
+        currentStep: 0,
+        status: "playing",
+        startedAt: Date.now()
     };
 
-    crash.games[playerId] = game;
-    scheduleSoloCrash(game);
+    chicken.games[playerId] = game;
     queueChipSave();
 
     res.json({
         ok: true,
-        serverTime: Date.now(),
-        game: publicCrashGame(game),
+        game: publicChickenGame(game),
         balance: getChipBalance(playerId),
         state: publicState()
     });
 });
 
-app.post("/crash/cashout", (req, res) => {
-    const crash = ensureCrashState();
+app.post("/chicken/cross", (req, res) => {
+    const chicken = ensureChickenState();
 
     const playerId =
         cleanPlayerId(req.body?.playerId);
 
-    const game =
-        crash.games[playerId];
+    const game = chicken.games[playerId];
 
-    if (!game || game.status !== "running") {
+    if (!game || game.status !== "playing") {
         return res.status(404).json({
             ok: false,
-            error: "No active Crash game"
+            error: "No active chicken game"
+        });
+    }
+
+    const risk =
+        CHICKEN_RISKS[game.risk] ||
+        CHICKEN_RISKS.medium;
+
+    const roll =
+        crypto.randomInt(0, 1_000_000) /
+        1_000_000;
+
+    if (roll >= risk.survivalChance) {
+        const failedAtStep =
+            game.currentStep + 1;
+
+        finishChickenGame(
+            game,
+            "hit",
+            0,
+            0
+        );
+
+        return res.json({
+            ok: true,
+            safe: false,
+            failedAtStep,
+            state: publicState()
+        });
+    }
+
+    game.currentStep += 1;
+
+    const multiplier =
+        chickenMultiplierForStep(
+            game.currentStep,
+            game.risk
+        );
+
+    if (game.currentStep >= CHICKEN_MAX_STEPS) {
+        const payout = Math.floor(
+            game.betAmount * multiplier
+        );
+
+        const credited = creditChips(
+            game.playerId,
+            payout,
+            {
+                playerName: game.playerName,
+                type: "payout",
+                gameType: "chicken",
+                note:
+                    `Chicken Crossing completed at x${multiplier.toFixed(2)}`
+            }
+        );
+
+        if (!credited) {
+            return res.status(400).json({
+                ok: false,
+                error: "Could not pay chicken winnings"
+            });
+        }
+
+        finishChickenGame(
+            game,
+            "completed",
+            payout,
+            multiplier
+        );
+
+        return res.json({
+            ok: true,
+            safe: true,
+            completed: true,
+            multiplier,
+            payout,
+            state: publicState()
+        });
+    }
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        safe: true,
+        completed: false,
+        step: game.currentStep,
+        multiplier,
+        potentialPayout:
+            Math.floor(
+                game.betAmount * multiplier
+            ),
+        state: publicState()
+    });
+});
+
+app.post("/chicken/cashout", (req, res) => {
+    const chicken = ensureChickenState();
+
+    const playerId =
+        cleanPlayerId(req.body?.playerId);
+
+    const game = chicken.games[playerId];
+
+    if (!game || game.status !== "playing") {
+        return res.status(404).json({
+            ok: false,
+            error: "No active chicken game"
+        });
+    }
+
+    if (game.currentStep < 1) {
+        return res.status(400).json({
+            ok: false,
+            error: "Cross at least one lane before cashing out"
         });
     }
 
     const multiplier =
-        getCrashMultiplier(game);
-
-    if (multiplier >= game.crashPoint) {
-        finishSoloCrashGame(
-            game,
-            "crashed",
-            0,
-            null
+        chickenMultiplierForStep(
+            game.currentStep,
+            game.risk
         );
-
-        return res.status(409).json({
-            ok: false,
-            error: "Too late - it already crashed"
-        });
-    }
 
     const payout = Math.floor(
         game.betAmount * multiplier
@@ -3469,20 +3579,20 @@ app.post("/crash/cashout", (req, res) => {
         {
             playerName: game.playerName,
             type: "payout",
-            gameType: "crash",
+            gameType: "chicken",
             note:
-                `Solo Crash cashout at x${multiplier.toFixed(2)}`
+                `Chicken Crossing cashout at x${multiplier.toFixed(2)}`
         }
     );
 
     if (!credited) {
         return res.status(400).json({
             ok: false,
-            error: "Could not pay Crash winnings"
+            error: "Could not pay chicken winnings"
         });
     }
 
-    finishSoloCrashGame(
+    finishChickenGame(
         game,
         "cashout",
         payout,
@@ -3491,93 +3601,16 @@ app.post("/crash/cashout", (req, res) => {
 
     res.json({
         ok: true,
-        serverTime: Date.now(),
         multiplier,
         payout,
+        profit: payout - game.betAmount,
         balance: getChipBalance(playerId),
         state: publicState()
     });
 });
 
-app.get("/crash/status", (req, res) => {
-    const crash = ensureCrashState();
-
-    const playerId =
-        cleanPlayerId(req.query?.playerId);
-
-    const game =
-        crash.games[playerId] || null;
-
-    if (!game || game.status !== "running") {
-        const latest = crash.history.find(
-            entry =>
-                entry.playerId === playerId
-        ) || null;
-
-        return res.json({
-            ok: true,
-            serverTime: Date.now(),
-            running: false,
-            latestResult: latest
-                ? {
-                    gameId: latest.gameId,
-                    result: latest.result,
-                    crashPoint:
-                        latest.crashPoint,
-                    cashoutMultiplier:
-                        latest.cashoutMultiplier,
-                    payout: latest.payout,
-                    profit: latest.profit,
-                    createdAt: latest.createdAt
-                }
-                : null
-        });
-    }
-
-    const multiplier =
-        getCrashMultiplier(game);
-
-    // Close the game here too if the timeout callback is delayed.
-    if (multiplier >= game.crashPoint) {
-        finishSoloCrashGame(
-            game,
-            "crashed",
-            0,
-            null
-        );
-
-        return res.json({
-            ok: true,
-            serverTime: Date.now(),
-            running: false,
-            latestResult: {
-                gameId: game.gameId,
-                result: "crashed",
-                crashPoint:
-                    game.crashPoint,
-                cashoutMultiplier: null,
-                payout: 0,
-                profit:
-                    -game.betAmount,
-                createdAt: Date.now()
-            }
-        });
-    }
-
-    res.json({
-        ok: true,
-        serverTime: Date.now(),
-        running: true,
-        gameId: game.gameId,
-        multiplier,
-        betAmount: game.betAmount,
-        startedAt: game.startedAt,
-        growthRate:
-            CRASH_GROWTH_RATE
-    });
-});
-
 // Deal game routes
+
 
 
 app.post("/deal/start", (req, res) => {
