@@ -14,7 +14,6 @@ const AUTO_START_DELAY_MS = 20_000;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
-// Free spins must stay limited because they can award more free spins.
 const SLOT_FREE_SPINS_AWARD = { 3: 3, 4: 5, 5: 8 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
@@ -24,10 +23,21 @@ const MINES_MAX_HISTORY = 100;
 const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
-// Early offers are deliberately conservative and become
-// increasingly fair as fewer cases remain.
-// Banker offers begin reasonably close to the remaining-case average
-// and become slightly more generous as the game approaches the end.
+const DAILY_SPIN_MAX_HISTORY = 500;
+
+
+const DAILY_SPIN_PRIZES = [
+    { id: "chips_10m", type: "chips", label: "19M Chips", amount: 19_000_000, weight: 26 },
+    { id: "chips_50m", type: "chips", label: "59M Chips", amount: 59_000_000, weight: 15 },
+    { id: "chips_100m", type: "chips", label: "109M Chips", amount: 109_000_000, weight: 8 },
+
+    // Add your in-game items here. Examples:
+    { id: "100x Concrete", type: "item", label: "100x Concrete", itemName: "100x Concrete", quantity: 1, weight: 4 },
+    { id: "250x Concrete", type: "item", label: "250x Concrete", itemName: "250x Concrete", quantity: 1, weight: 1 },
+
+    { id: "nothing", type: "nothing", label: "Nothing", weight: 46 }
+];
+
 const DEAL_OFFER_BASE_FACTOR = 0.82;
 const DEAL_OFFER_PROGRESS_BONUS = 0.26;
 const DEAL_OFFER_MAX_FACTOR = 1.05;
@@ -102,6 +112,12 @@ const state = {
     chicken: {
         games: {},
         history: []
+    },
+
+    dailySpin: {
+        claims: {},
+        history: [],
+        deliveries: {}
     },
 
     wheel: {
@@ -269,6 +285,18 @@ function loadChipData() {
                 saved.chicken.history.slice(0, 50);
         }
 
+        if (saved.dailySpin && typeof saved.dailySpin === "object") {
+            if (saved.dailySpin.claims && typeof saved.dailySpin.claims === "object") {
+                state.dailySpin.claims = saved.dailySpin.claims;
+            }
+            if (Array.isArray(saved.dailySpin.history)) {
+                state.dailySpin.history = saved.dailySpin.history.slice(0, DAILY_SPIN_MAX_HISTORY);
+            }
+            if (saved.dailySpin.deliveries && typeof saved.dailySpin.deliveries === "object") {
+                state.dailySpin.deliveries = saved.dailySpin.deliveries;
+            }
+        }
+
         console.log(
             `Loaded chip balances for ${
                 Object.keys(state.chips.balances).length
@@ -321,6 +349,11 @@ function saveChipDataImmediately() {
             },
             chicken: {
                 history: state.chicken.history
+            },
+            dailySpin: {
+                claims: state.dailySpin.claims,
+                history: state.dailySpin.history,
+                deliveries: state.dailySpin.deliveries
             },
             savedAt: Date.now()
         };
@@ -2185,6 +2218,67 @@ function finishChickenGame(
     queueChipSave();
 }
 
+function pickDailySpinPrize() {
+    const totalWeight = DAILY_SPIN_PRIZES.reduce(
+        (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
+        0
+    );
+
+    if (totalWeight <= 0) {
+        throw new Error("Daily spin prize weights must total more than zero");
+    }
+
+    let roll = crypto.randomInt(1, totalWeight + 1);
+
+    for (const prize of DAILY_SPIN_PRIZES) {
+        roll -= Math.max(0, Number(prize.weight || 0));
+        if (roll <= 0) return prize;
+    }
+
+    return DAILY_SPIN_PRIZES[DAILY_SPIN_PRIZES.length - 1];
+}
+
+function publicDailySpinPrizes() {
+    return DAILY_SPIN_PRIZES.map(prize => ({
+        id: prize.id,
+        type: prize.type,
+        label: prize.label,
+        amount: prize.type === "chips" ? Number(prize.amount || 0) : undefined,
+        quantity: prize.type === "item" ? Number(prize.quantity || 1) : undefined
+    }));
+}
+
+function getDailySpinStatus(playerId) {
+    const id = cleanPlayerId(playerId);
+    const today = getUtcDateKey();
+    const claim = id ? state.dailySpin.claims[id] : null;
+    const claimedToday = Boolean(claim && claim.dateKey === today);
+
+    return {
+        dateKey: today,
+        claimedToday,
+        nextSpinAt: Date.parse(`${today}T00:00:00.000Z`) + 86_400_000,
+        lastResult: claim || null,
+        prizes: publicDailySpinPrizes()
+    };
+}
+
+function publicDailySpinState() {
+    return {
+        prizes: publicDailySpinPrizes(),
+        recentHistory: state.dailySpin.history.slice(0, 25).map(entry => ({
+            spinId: entry.spinId,
+            playerId: entry.playerId,
+            playerName: entry.playerName,
+            prizeType: entry.prizeType,
+            prizeLabel: entry.prizeLabel,
+            amount: entry.amount || 0,
+            quantity: entry.quantity || 0,
+            createdAt: entry.createdAt
+        }))
+    };
+}
+
 function publicState() {
     return {
         chips: publicChipState(),
@@ -2193,6 +2287,7 @@ function publicState() {
         deal: publicDealState(),
         roulette: publicRouletteState(),
         chicken: publicChickenState(),
+        dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
@@ -2659,6 +2754,10 @@ app.post("/chips/reset-all", (req, res) => {
     state.chicken.games = {};
     state.chicken.history = [];
 
+    state.dailySpin.claims = {};
+    state.dailySpin.history = [];
+    state.dailySpin.deliveries = {};
+
     state.wheel.bets = [];
     state.wheel.history = [];
     state.wheel.spinning = false;
@@ -3116,6 +3215,156 @@ app.post("/chips/set-balance", (req, res) => {
         balance,
         state: publicState()
     });
+});
+
+// Daily spin routes
+
+app.get("/daily-spin/status", (req, res) => {
+    const playerId = cleanPlayerId(req.query?.playerId);
+
+    if (!playerId) {
+        return res.status(400).json({ ok: false, error: "Invalid player ID" });
+    }
+
+    rememberPlayer(playerId);
+
+    res.json({
+        ok: true,
+        status: getDailySpinStatus(playerId),
+        balance: getChipBalance(playerId)
+    });
+});
+
+app.post("/daily-spin/spin", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+
+    if (!playerId || !playerName) {
+        return res.status(400).json({ ok: false, error: "Invalid player" });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const today = getUtcDateKey();
+    const existing = state.dailySpin.claims[playerId];
+
+    if (existing && existing.dateKey === today) {
+        return res.status(409).json({
+            ok: false,
+            error: "You have already used today's daily spin",
+            status: getDailySpinStatus(playerId)
+        });
+    }
+
+    const prize = pickDailySpinPrize();
+    const spinId = crypto.randomBytes(8).toString("hex");
+    const createdAt = Date.now();
+    let deliveryId = null;
+
+    if (prize.type === "chips") {
+        const amount = cleanAmount(prize.amount);
+        if (!amount || !creditChips(playerId, amount, {
+            playerName,
+            type: "daily-spin-prize",
+            gameType: "daily-spin",
+            note: `Daily spin prize: ${prize.label}`
+        })) {
+            return res.status(500).json({ ok: false, error: "Could not credit daily-spin chips" });
+        }
+    } else if (prize.type === "item") {
+        deliveryId = crypto.randomBytes(8).toString("hex");
+
+        state.dailySpin.deliveries[deliveryId] = {
+            deliveryId,
+            spinId,
+            playerId,
+            playerName,
+            itemName: String(prize.itemName || prize.label),
+            prizeLabel: prize.label,
+            quantity: Math.max(1, Math.floor(Number(prize.quantity || 1))),
+            status: "pending",
+            createdAt,
+            deliveredAt: null,
+            deliveredBy: null
+        };
+
+        addDiscordEvent("daily-spin-item", {
+            deliveryId,
+            spinId,
+            playerId,
+            playerName,
+            itemName: String(prize.itemName || prize.label),
+            prizeLabel: prize.label,
+            quantity: Math.max(1, Math.floor(Number(prize.quantity || 1)))
+        });
+    }
+
+    const result = {
+        spinId,
+        dateKey: today,
+        playerId,
+        playerName,
+        prizeId: prize.id,
+        prizeType: prize.type,
+        prizeLabel: prize.label,
+        amount: prize.type === "chips" ? Number(prize.amount || 0) : 0,
+        itemName: prize.type === "item" ? String(prize.itemName || prize.label) : null,
+        quantity: prize.type === "item" ? Math.max(1, Math.floor(Number(prize.quantity || 1))) : 0,
+        deliveryId,
+        deliveryStatus: deliveryId ? "pending" : null,
+        createdAt
+    };
+
+    state.dailySpin.claims[playerId] = result;
+    state.dailySpin.history.unshift(result);
+    state.dailySpin.history = state.dailySpin.history.slice(0, DAILY_SPIN_MAX_HISTORY);
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        result,
+        status: getDailySpinStatus(playerId),
+        balance: getChipBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/discord/daily-spin/delivered", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const deliveryId = String(req.body?.deliveryId || "").trim();
+    const delivery = state.dailySpin.deliveries[deliveryId];
+
+    if (!delivery) {
+        return res.status(404).json({ ok: false, error: "Daily-spin delivery not found" });
+    }
+
+    if (delivery.status === "delivered") {
+        return res.json({ ok: true, delivery: { ...delivery }, alreadyDelivered: true });
+    }
+
+    delivery.status = "delivered";
+    delivery.deliveredAt = Date.now();
+    delivery.deliveredBy = {
+        discordUserId: String(req.body?.discordUserId || ""),
+        discordDisplayName: String(req.body?.discordDisplayName || "")
+    };
+
+    const claim = state.dailySpin.claims[delivery.playerId];
+    if (claim && claim.spinId === delivery.spinId) {
+        claim.deliveryStatus = "delivered";
+        claim.deliveredAt = delivery.deliveredAt;
+    }
+
+    const historyEntry = state.dailySpin.history.find(entry => entry.spinId === delivery.spinId);
+    if (historyEntry) {
+        historyEntry.deliveryStatus = "delivered";
+        historyEntry.deliveredAt = delivery.deliveredAt;
+    }
+
+    queueChipSave();
+
+    res.json({ ok: true, delivery: { ...delivery } });
 });
 
 // Discord bot chip-request routes
