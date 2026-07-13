@@ -32,8 +32,8 @@ const DAILY_SPIN_PRIZES = [
     { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
 
     // Add your in-game items here. Examples:
-    { id: "100x Concrete", type: "item", label: "100x Concrete", itemName: "100x Concrete", quantity: 1, weight: 4 },
-    { id: "250x Concrete", type: "item", label: "250x Concrete", itemName: "250x Concrete", quantity: 1, weight: 1 },
+    { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
+    { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "250K x Random BXP", quantity: 1, weight: 1 },
 
     { id: "nothing", type: "nothing", label: "Nothing", weight: 40 }
 ];
