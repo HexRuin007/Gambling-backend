@@ -30,7 +30,7 @@ const DAILY_SPIN_PRIZES = [
     { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
     { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 15 },
     { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
-    { id: "chips_250m". type: "chips", label: "250m Chips", amount :250_000_000, weight: 4 },
+    { id: "chips_250m", type: "chips", label: "250M Chips", amount: 250_000_000, weight: 4 },
 
    
     { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
