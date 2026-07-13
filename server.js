@@ -27,15 +27,15 @@ const DAILY_SPIN_MAX_HISTORY = 500;
 
 
 const DAILY_SPIN_PRIZES = [
-    { id: "chips_10m", type: "chips", label: "19M Chips", amount: 19_000_000, weight: 26 },
-    { id: "chips_50m", type: "chips", label: "59M Chips", amount: 59_000_000, weight: 15 },
-    { id: "chips_100m", type: "chips", label: "109M Chips", amount: 109_000_000, weight: 8 },
+    { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
+    { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 15 },
+    { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
 
     // Add your in-game items here. Examples:
     { id: "100x Concrete", type: "item", label: "100x Concrete", itemName: "100x Concrete", quantity: 1, weight: 4 },
     { id: "250x Concrete", type: "item", label: "250x Concrete", itemName: "250x Concrete", quantity: 1, weight: 1 },
 
-    { id: "nothing", type: "nothing", label: "Nothing", weight: 46 }
+    { id: "nothing", type: "nothing", label: "Nothing", weight: 40 }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
