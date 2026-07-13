@@ -972,21 +972,17 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-    // Tuned for roughly 95% long-term RTP across the complete slot system:
-    // paylines, wild substitutions, scatter nudges, 3/5/8 free spins,
-    // free-spin multipliers and returning the original bet on paid wins.
-    //
-    // Normal line payouts use 1/10th of the total bet per payline.
-    { id: "pear", label: "🍐", weight: 34, pays: { 3: 1, 4: 3, 5: 10 } },
-    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 1, 4: 4, 5: 14 } },
-    { id: "bell", label: "🔔", weight: 22, pays: { 3: 2, 4: 6, 5: 20 } },
-    { id: "gem", label: "💎", weight: 16, pays: { 3: 2, 4: 8, 5: 30 } },
-    { id: "crown", label: "👑", weight: 11, pays: { 3: 3, 4: 12, 5: 50 } },
-    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 5, 4: 20, 5: 100 } },
-    { id: "wild", label: "🃏", weight: 5, pays: { 3: 8, 4: 40, 5: 200 } },
+   
+    { id: "pear", label: "🍐", weight: 1, pays: { 3: 1, 4: 3, 5: 10 } },
+    { id: "cherry", label: "🍒", weight: 1, pays: { 3: 1, 4: 4, 5: 14 } },
+    { id: "bell", label: "🔔", weight: 1, pays: { 3: 2, 4: 6, 5: 20 } },
+    { id: "gem", label: "💎", weight: 1, pays: { 3: 2, 4: 8, 5: 30 } },
+    { id: "crown", label: "👑", weight: 1, pays: { 3: 3, 4: 12, 5: 50 } },
+    { id: "seven", label: "7️⃣", weight: 1, pays: { 3: 5, 4: 20, 5: 100 } },
+    { id: "wild", label: "🃏", weight: 1, pays: { 3: 8, 4: 40, 5: 200 } },
 
-    // Scatter payouts use the full total bet rather than the per-line bet.
-    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 1, 4: 5, 5: 20 } }
+   
+    { id: "scatter", label: "🐉", weight: 93, pays: { 3: 1, 4: 5, 5: 20 } }
 ];
 
 const SLOT_PAYLINES = [
