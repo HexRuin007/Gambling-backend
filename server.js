@@ -30,12 +30,13 @@ const DAILY_SPIN_PRIZES = [
     { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
     { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 15 },
     { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
+    { id: "chips_250m". type: "chips", label: "250m Chips", amount :250_000_000, weight: 4 },
 
-    // Add your in-game items here. Examples:
+   
     { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
     { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "250K x Random BXP", quantity: 1, weight: 1 },
 
-    { id: "nothing", type: "nothing", label: "Nothing", weight: 40 }
+    { id: "nothing", type: "nothing", label: "Nothing", weight: 36 }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
@@ -116,6 +117,7 @@ const state = {
 
     dailySpin: {
         claims: {},
+        bonusSpins: {},
         history: [],
         deliveries: {}
     },
@@ -289,6 +291,9 @@ function loadChipData() {
             if (saved.dailySpin.claims && typeof saved.dailySpin.claims === "object") {
                 state.dailySpin.claims = saved.dailySpin.claims;
             }
+            if (saved.dailySpin.bonusSpins && typeof saved.dailySpin.bonusSpins === "object") {
+                state.dailySpin.bonusSpins = saved.dailySpin.bonusSpins;
+            }
             if (Array.isArray(saved.dailySpin.history)) {
                 state.dailySpin.history = saved.dailySpin.history.slice(0, DAILY_SPIN_MAX_HISTORY);
             }
@@ -352,6 +357,7 @@ function saveChipDataImmediately() {
             },
             dailySpin: {
                 claims: state.dailySpin.claims,
+                bonusSpins: state.dailySpin.bonusSpins,
                 history: state.dailySpin.history,
                 deliveries: state.dailySpin.deliveries
             },
@@ -2249,10 +2255,17 @@ function getDailySpinStatus(playerId) {
     const today = getUtcDateKey();
     const claim = id ? state.dailySpin.claims[id] : null;
     const claimedToday = Boolean(claim && claim.dateKey === today);
+    const bonusSpins = id
+        ? Math.max(0, Math.floor(Number(state.dailySpin.bonusSpins[id] || 0)))
+        : 0;
+    const remainingSpins = (claimedToday ? 0 : 1) + bonusSpins;
 
     return {
         dateKey: today,
         claimedToday,
+        bonusSpins,
+        remainingSpins,
+        canSpin: remainingSpins > 0,
         nextSpinAt: Date.parse(`${today}T00:00:00.000Z`) + 86_400_000,
         lastResult: claim || null,
         prizes: publicDailySpinPrizes()
@@ -3215,6 +3228,43 @@ app.post("/chips/set-balance", (req, res) => {
 
 // Daily spin routes
 
+app.post("/daily-spin/grant", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const amount = Math.floor(Number(req.body?.amount));
+
+    if (!playerId) {
+        return res.status(400).json({ ok: false, error: "Invalid player ID" });
+    }
+
+    if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1000) {
+        return res.status(400).json({
+            ok: false,
+            error: "Spin amount must be between 1 and 1000"
+        });
+    }
+
+    rememberPlayer(playerId);
+
+    const current = Math.max(
+        0,
+        Math.floor(Number(state.dailySpin.bonusSpins[playerId] || 0))
+    );
+
+    state.dailySpin.bonusSpins[playerId] = current + amount;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        playerId,
+        added: amount,
+        bonusSpins: state.dailySpin.bonusSpins[playerId],
+        status: getDailySpinStatus(playerId),
+        state: publicState()
+    });
+});
+
 app.get("/daily-spin/status", (req, res) => {
     const playerId = cleanPlayerId(req.query?.playerId);
 
@@ -3243,13 +3293,22 @@ app.post("/daily-spin/spin", (req, res) => {
 
     const today = getUtcDateKey();
     const existing = state.dailySpin.claims[playerId];
+    const hasUsedDailySpin = Boolean(existing && existing.dateKey === today);
+    const bonusSpins = Math.max(
+        0,
+        Math.floor(Number(state.dailySpin.bonusSpins[playerId] || 0))
+    );
 
-    if (existing && existing.dateKey === today) {
+    if (hasUsedDailySpin && bonusSpins <= 0) {
         return res.status(409).json({
             ok: false,
-            error: "You have already used today's daily spin",
+            error: "You have no daily spins remaining",
             status: getDailySpinStatus(playerId)
         });
+    }
+
+    if (hasUsedDailySpin) {
+        state.dailySpin.bonusSpins[playerId] = bonusSpins - 1;
     }
 
     const prize = pickDailySpinPrize();
