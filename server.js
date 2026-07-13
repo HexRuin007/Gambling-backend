@@ -26,7 +26,11 @@ const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
 // Early offers are deliberately conservative and become
 // increasingly fair as fewer cases remain.
-const DEAL_OFFER_BASE_FACTOR = 0.68;
+// Banker offers begin reasonably close to the remaining-case average
+// and become slightly more generous as the game approaches the end.
+const DEAL_OFFER_BASE_FACTOR = 0.82;
+const DEAL_OFFER_PROGRESS_BONUS = 0.26;
+const DEAL_OFFER_MAX_FACTOR = 1.05;
 const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
@@ -1269,11 +1273,16 @@ function calculateDealOffer(game) {
         (DEAL_CASE_COUNT - 1);
 
     const factor = Math.min(
-        0.92,
+        DEAL_OFFER_MAX_FACTOR,
         DEAL_OFFER_BASE_FACTOR +
-        progress * 0.24
+        progress * DEAL_OFFER_PROGRESS_BONUS
     );
 
+    // Round to whole chips after applying the banker factor.
+    // Approximate offer levels are now:
+    // first offer: 87% of remaining-case average
+    // middle offers: 92% to 98%
+    // final offers: up to 105%
     return Math.max(
         1,
         Math.floor(average * factor)
