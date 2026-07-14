@@ -228,7 +228,7 @@ function loadChipData() {
 
         if (Array.isArray(saved.transactions)) {
             state.chips.transactions =
-                saved.transactions.slice(0, 200);
+                saved.transactions.slice(0, 5000);
         }
 
         if (
@@ -622,7 +622,7 @@ function rememberPlayer(playerId, playerName) {
     });
 
     state.chips.transactions =
-        state.chips.transactions.slice(0, 200);
+        state.chips.transactions.slice(0, 5000);
 
     queueChipSave();
 
@@ -674,7 +674,7 @@ function addChipTransaction({
 
     state.chips.transactions.unshift(transaction);
     state.chips.transactions =
-        state.chips.transactions.slice(0, 200);
+        state.chips.transactions.slice(0, 5000);
 
     return transaction;
 }
@@ -1125,6 +1125,150 @@ function addDiscordEvent(type, data = {}) {
 
     queueChipSave();
     return event;
+}
+
+
+function buildPlayerGamblingAudit(playerId, limit = 20) {
+    const id = cleanPlayerId(playerId);
+    const safeLimit = Math.min(
+        100,
+        Math.max(1, Number(limit) || 20)
+    );
+
+    const transactions = state.chips.transactions
+        .filter(transaction =>
+            cleanPlayerId(transaction.playerId) === id &&
+            [
+                "bet",
+                "bet-adjustment",
+                "payout",
+                "bet-refund"
+            ].includes(String(transaction.type || ""))
+        )
+        .sort((a, b) =>
+            Number(a.createdAt || 0) -
+            Number(b.createdAt || 0)
+        );
+
+    const unmatchedBets = [];
+    const results = [];
+
+    const transactionBalanceBefore = transaction =>
+        Number(transaction.balanceAfter || 0) -
+        Number(transaction.amount || 0);
+
+    for (const transaction of transactions) {
+        const type = String(transaction.type || "");
+        const gameType = String(transaction.gameType || "casino");
+        const amount = Number(transaction.amount || 0);
+        const createdAt = Number(transaction.createdAt || 0);
+
+        if (type === "bet" || type === "bet-adjustment") {
+            unmatchedBets.push({
+                transaction,
+                gameType,
+                wager: Math.abs(amount),
+                balanceBefore:
+                    transactionBalanceBefore(transaction),
+                balanceAfterBet:
+                    Number(transaction.balanceAfter || 0),
+                createdAt
+            });
+            continue;
+        }
+
+        if (type === "payout" || type === "bet-refund") {
+            let matchedIndex = -1;
+
+            for (let index = unmatchedBets.length - 1; index >= 0; index--) {
+                if (
+                    unmatchedBets[index].gameType === gameType &&
+                    unmatchedBets[index].createdAt <= createdAt
+                ) {
+                    matchedIndex = index;
+                    break;
+                }
+            }
+
+            const matchedBet =
+                matchedIndex >= 0
+                    ? unmatchedBets.splice(matchedIndex, 1)[0]
+                    : null;
+
+            const payout = Math.max(0, amount);
+            const wager = matchedBet?.wager || 0;
+            const net = payout - wager;
+
+            results.push({
+                resultId:
+                    transaction.transactionId ||
+                    crypto.randomBytes(6).toString("hex"),
+                playerId: id,
+                playerName:
+                    transaction.playerName ||
+                    state.chips.playerNames[id] ||
+                    "Player",
+                gameType,
+                outcome:
+                    type === "bet-refund"
+                        ? "refund"
+                        : net > 0
+                            ? "win"
+                            : net < 0
+                                ? "loss"
+                                : "break-even",
+                wager,
+                payout,
+                net,
+                balanceBefore:
+                    matchedBet
+                        ? matchedBet.balanceBefore
+                        : transactionBalanceBefore(transaction),
+                balanceAfter:
+                    Number(transaction.balanceAfter || 0),
+                startedAt:
+                    matchedBet?.createdAt || createdAt,
+                completedAt: createdAt,
+                note:
+                    String(transaction.note || "")
+            });
+        }
+    }
+
+    const pendingCutoff = Date.now() - 120_000;
+
+    for (const unmatched of unmatchedBets) {
+        const pending = unmatched.createdAt > pendingCutoff;
+
+        results.push({
+            resultId:
+                unmatched.transaction.transactionId ||
+                crypto.randomBytes(6).toString("hex"),
+            playerId: id,
+            playerName:
+                unmatched.transaction.playerName ||
+                state.chips.playerNames[id] ||
+                "Player",
+            gameType: unmatched.gameType,
+            outcome: pending ? "pending" : "loss",
+            wager: unmatched.wager,
+            payout: 0,
+            net: -unmatched.wager,
+            balanceBefore: unmatched.balanceBefore,
+            balanceAfter: unmatched.balanceAfterBet,
+            startedAt: unmatched.createdAt,
+            completedAt: unmatched.createdAt,
+            note:
+                String(unmatched.transaction.note || "")
+        });
+    }
+
+    return results
+        .sort((a, b) =>
+            Number(b.completedAt || 0) -
+            Number(a.completedAt || 0)
+        )
+        .slice(0, safeLimit);
 }
 
 function publicChipState() {
@@ -2883,6 +3027,54 @@ app.post("/chips/register-player", (req, res) => {
             getChipBalance(playerId),
         state:
             publicState()
+    });
+});
+
+
+app.get("/chips/player-audit", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(
+        req.query?.playerId
+    );
+
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Enter a player ID"
+        });
+    }
+
+    const playerExists =
+        Object.prototype.hasOwnProperty.call(
+            state.chips.balances,
+            playerId
+        ) ||
+        Boolean(state.chips.playerNames[playerId]);
+
+    if (!playerExists) {
+        return res.status(404).json({
+            ok: false,
+            error: "Player was not found"
+        });
+    }
+
+    const results = buildPlayerGamblingAudit(
+        playerId,
+        req.query?.limit || 20
+    );
+
+    res.json({
+        ok: true,
+        player: {
+            playerId,
+            playerName:
+                state.chips.playerNames[playerId] ||
+                "Player",
+            currentBalance:
+                getChipBalance(playerId)
+        },
+        results
     });
 });
 
