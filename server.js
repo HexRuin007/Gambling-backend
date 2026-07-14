@@ -24,7 +24,8 @@ const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
-const MK15_DAILY_SPIN_ODDS = 100_000; // Exactly 1 in 1,000,000 while still available.
+const MK15_DAILY_SPIN_ODDS = 100_000;
+const Grinder_DAILY_SPIN_ODDS = 10_000;
 
 
 const DAILY_SPIN_PRIZES = [
@@ -36,16 +37,25 @@ const DAILY_SPIN_PRIZES = [
         quantity: 1,
         oneTimeGlobal: true
     },
+
+    { id: "grinder",
+        type: "item".
+            label: "Grinder Knife",
+            itemName: "GrinderKnife",
+     quantity: 1,
+     oneTimeGlobal: true
+    },
+    
     { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
-    { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 15 },
-    { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
+    { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 17 },
+    { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 12 },
     { id: "chips_250m", type: "chips", label: "250M Chips", amount: 250_000_000, weight: 4 },
 
    
     { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
     { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "250K x Random BXP", quantity: 1, weight: 1 },
 
-    { id: "nothing", type: "nothing", label: "Nothing", weight: 36 }
+    { id: "nothing", type: "nothing", label: "Nothing", weight: 26 }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
