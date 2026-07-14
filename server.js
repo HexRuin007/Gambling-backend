@@ -2755,6 +2755,153 @@ app.get("/chips/daily-profit", (req, res) => {
     });
 });
 
+app.post("/chips/reset-player", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const requesterId = cleanPlayerId(req.body?.requesterId);
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const confirmation = String(req.body?.confirmation || "").trim();
+
+    if (!requesterId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Missing requester ID"
+        });
+    }
+
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Enter a valid player ID"
+        });
+    }
+
+    if (confirmation !== "RESET PLAYER") {
+        return res.status(400).json({
+            ok: false,
+            error: 'Type "RESET PLAYER" to confirm'
+        });
+    }
+
+    const playerName =
+        state.chips.playerNames[playerId] || "Player";
+    const previousBalance = getChipBalance(playerId);
+    const existed = Object.prototype.hasOwnProperty.call(
+        state.chips.balances,
+        playerId
+    );
+
+    if (!existed) {
+        return res.status(404).json({
+            ok: false,
+            error: `No casino account found for player ${playerId}`
+        });
+    }
+
+    delete state.chips.balances[playerId];
+    delete state.chips.playerNames[playerId];
+    delete state.chips.leaderboardStats[playerId];
+
+    state.chips.requests = state.chips.requests.filter(
+        request => cleanPlayerId(request.playerId) !== playerId
+    );
+    state.chips.withdrawalRequests = state.chips.withdrawalRequests.filter(
+        request => cleanPlayerId(request.playerId) !== playerId
+    );
+    state.chips.discordEvents = state.chips.discordEvents.filter(
+        event => cleanPlayerId(event.playerId) !== playerId
+    );
+    state.chips.transactions = state.chips.transactions.filter(
+        transaction => cleanPlayerId(transaction.playerId) !== playerId
+    );
+
+    delete state.slots.freeSpins[playerId];
+    delete state.slots.lastPaidBet[playerId];
+    state.slots.history = state.slots.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    delete state.mines.games[playerId];
+    state.mines.history = state.mines.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    delete state.deal.games[playerId];
+    state.deal.history = state.deal.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    delete state.chicken.games[playerId];
+    state.chicken.history = state.chicken.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    delete state.dailySpin.claims[playerId];
+    delete state.dailySpin.bonusSpins[playerId];
+    state.dailySpin.history = state.dailySpin.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    for (const [deliveryId, delivery] of Object.entries(
+        state.dailySpin.deliveries || {}
+    )) {
+        if (cleanPlayerId(delivery?.playerId) === playerId) {
+            delete state.dailySpin.deliveries[deliveryId];
+        }
+    }
+
+    // oneTimeClaims is intentionally retained. Globally unique prizes
+    // such as the MK15 must remain permanently claimed.
+
+    state.wheel.bets = state.wheel.bets.filter(
+        bet => cleanPlayerId(bet.playerId) !== playerId
+    );
+    state.wheel.history = state.wheel.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    state.roulette.bets = state.roulette.bets.filter(
+        bet => cleanPlayerId(bet.playerId) !== playerId
+    );
+    state.roulette.history = state.roulette.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    state.blackjack.bets = state.blackjack.bets.filter(
+        bet => cleanPlayerId(bet.playerId) !== playerId
+    );
+    state.blackjack.players = state.blackjack.players.filter(
+        player => cleanPlayerId(player.playerId) !== playerId
+    );
+    state.blackjack.history = state.blackjack.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    state.racing.bets = state.racing.bets.filter(
+        bet => cleanPlayerId(bet.playerId) !== playerId
+    );
+    state.racing.history = state.racing.history.filter(
+        entry => cleanPlayerId(entry.playerId) !== playerId
+    );
+
+    saveChipDataImmediately();
+
+    console.warn(
+        `Casino player reset by ${requesterId}: ` +
+        `${playerName} (${playerId}), ${previousBalance} chips cleared`
+    );
+
+    res.json({
+        ok: true,
+        resetBy: requesterId,
+        resetAt: Date.now(),
+        playerId,
+        playerName,
+        previousBalance,
+        state: publicState()
+    });
+});
+
 app.post("/chips/reset-all", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
