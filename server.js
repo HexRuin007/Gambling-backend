@@ -102,6 +102,7 @@ const state = {
         withdrawalRequests: [],
         discordEvents: [],
         transactions: [],
+        grantTypeTrackingStartedAt: 0,
         dailyHouseStats: {},
         leaderboardStats: {}
     },
@@ -227,6 +228,28 @@ function loadChipData() {
         if (Array.isArray(saved.transactions)) {
             state.chips.transactions =
                 saved.transactions.slice(0, 200);
+        }
+
+        if (
+            Number.isFinite(
+                Number(saved.grantTypeTrackingStartedAt)
+            ) &&
+            Number(saved.grantTypeTrackingStartedAt) > 0
+        ) {
+            state.chips.grantTypeTrackingStartedAt =
+                Number(saved.grantTypeTrackingStartedAt);
+        } else {
+            // First deployment of paid/free grant tracking:
+            // ignore every banker grant created before this moment.
+            state.chips.grantTypeTrackingStartedAt =
+                Date.now();
+
+            console.log(
+                "Paid/free banker grant tracking starts now. " +
+                "Older grants will be ignored."
+            );
+
+            queueChipSave();
         }
 
         if (
@@ -356,6 +379,8 @@ function saveChipDataImmediately() {
             discordEvents:
                 state.chips.discordEvents,
             transactions: state.chips.transactions,
+            grantTypeTrackingStartedAt:
+                state.chips.grantTypeTrackingStartedAt,
             dailyHouseStats: state.chips.dailyHouseStats,
             leaderboardStats: state.chips.leaderboardStats,
             slots: {
@@ -975,16 +1000,31 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
             Number(a.createdAt || a.updatedAt || 0)
         )[0] || null;
 
-    const sinceTimestamp = Number(
+    const previousWithdrawalTimestamp = Number(
         previousRequest?.createdAt ||
         previousRequest?.updatedAt ||
         0
     );
 
+    const trackingStartedAt = Number(
+        state.chips.grantTypeTrackingStartedAt || 0
+    );
+
+    // Only count grants made after paid/free tracking was enabled.
+    // This permanently excludes all historical unclassified grants.
+    const sinceTimestamp = Math.max(
+        previousWithdrawalTimestamp,
+        trackingStartedAt
+    );
+
     const grants = state.chips.transactions.filter(transaction =>
         cleanPlayerId(transaction.playerId) === id &&
         transaction.type === "banker-grant" &&
-        Number(transaction.createdAt || 0) > sinceTimestamp &&
+        (
+            transaction.grantType === "paid" ||
+            transaction.grantType === "free"
+        ) &&
+        Number(transaction.createdAt || 0) >= sinceTimestamp &&
         Number(transaction.createdAt || 0) <= cutoff
     );
 
@@ -996,13 +1036,8 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
         transaction => transaction.grantType === "free"
     );
 
-    // Older banker grants did not contain grantType. Keep them visible
-    // as unclassified rather than incorrectly calling them paid or free.
-    const unclassifiedGrants = grants.filter(
-        transaction =>
-            transaction.grantType !== "paid" &&
-            transaction.grantType !== "free"
-    );
+    // Historical grants without a paid/free type are deliberately ignored.
+    const unclassifiedGrants = [];
 
     const sumGrantAmounts = entries =>
         entries.reduce(
@@ -3890,6 +3925,13 @@ app.post("/discord/chips/approve", (req, res) => {
         "Discord approver"
     ).trim().slice(0, 80);
 
+    const grantType =
+        String(req.body?.grantType || "paid")
+            .trim()
+            .toLowerCase() === "free"
+            ? "free"
+            : "paid";
+
     const request = state.chips.requests.find(
         item =>
             item.requestId === requestId &&
@@ -3909,7 +3951,9 @@ app.post("/discord/chips/approve", (req, res) => {
         {
             playerName: request.playerName,
             type: "banker-grant",
+            grantType,
             note:
+                `${grantType === "free" ? "Free" : "Paid"} ` +
                 `Discord approval by ${discordDisplayName} ` +
                 `(${discordUserId || "unknown"})`
         }
@@ -3938,7 +3982,12 @@ app.post("/discord/chips/approve", (req, res) => {
         requestId,
         handledBy: discordDisplayName,
         handledByDiscordId:
-            discordUserId || null
+            discordUserId || null,
+        grantType,
+        grantTypeLabel:
+            grantType === "free"
+                ? "Free chips"
+                : "Paid chips" 
     });
 
     queueChipSave();
@@ -3951,7 +4000,8 @@ app.post("/discord/chips/approve", (req, res) => {
         playerName: request.playerName,
         amount: request.amount,
         newBalance:
-            getChipBalance(request.playerId)
+            getChipBalance(request.playerId),
+        grantType
     });
 });
 
