@@ -75,6 +75,8 @@ const adminTokens = new Set();
 
 let wheelAutoTimer = null;
 let blackjackAutoTimer = null;
+let blackjackTurnTimer = null;
+const BLACKJACK_TURN_TIMEOUT_MS = 45_000;
 let racingAutoTimer = null;
 let rouletteAutoTimer = null;
 
@@ -1955,11 +1957,69 @@ function activeBlackjackPlayer() {
     return state.blackjack.players[state.blackjack.currentTurnIndex] || null;
 }
 
+function clearBlackjackTurnTimer() {
+    if (blackjackTurnTimer) {
+        clearTimeout(blackjackTurnTimer);
+        blackjackTurnTimer = null;
+    }
+
+    state.blackjack.turnExpiresAt = null;
+}
+
+function scheduleBlackjackTurnTimeout() {
+    clearBlackjackTurnTimer();
+
+    const player = activeBlackjackPlayer();
+    if (!player || player.status !== "playing") return;
+
+    const expectedPlayerId = player.playerId;
+    state.blackjack.turnExpiresAt =
+        Date.now() + BLACKJACK_TURN_TIMEOUT_MS;
+
+    blackjackTurnTimer = setTimeout(() => {
+        blackjackTurnTimer = null;
+
+        const current = activeBlackjackPlayer();
+        if (
+            !current ||
+            current.playerId !== expectedPlayerId ||
+            current.status !== "playing"
+        ) {
+            return;
+        }
+
+        const refunded = creditChips(
+            current.playerId,
+            current.amount,
+            {
+                playerName: current.playerName,
+                type: "bet-refund",
+                gameType: "blackjack",
+                note: "Blackjack bet cancelled after 45 seconds of inactivity"
+            }
+        );
+
+        current.status = refunded
+            ? "cancelled-inactive"
+            : "cancelled-refund-failed";
+        current.payout = refunded ? current.amount : 0;
+        current.profit = refunded ? 0 : -current.amount;
+        current.cancelledAt = Date.now();
+
+        moveToNextBlackjackTurn();
+    }, BLACKJACK_TURN_TIMEOUT_MS);
+}
+
 function moveToNextBlackjackTurn() {
+    clearBlackjackTurnTimer();
+
     while (state.blackjack.currentTurnIndex < state.blackjack.players.length - 1) {
         state.blackjack.currentTurnIndex += 1;
         const player = state.blackjack.players[state.blackjack.currentTurnIndex];
-        if (player && player.status === "playing") return;
+        if (player && player.status === "playing") {
+            scheduleBlackjackTurnTimeout();
+            return;
+        }
     }
 
     finishBlackjackRound();
@@ -1969,6 +2029,7 @@ function finishBlackjackRound() {
     const bj = state.blackjack;
     if (bj.status !== "playing") return;
 
+    clearBlackjackTurnTimer();
     bj.status = "finished";
     bj.currentTurnIndex = -1;
 
@@ -1980,6 +2041,13 @@ function finishBlackjackRound() {
     const dealerBust = dealerTotal > 21;
 
     bj.players.forEach(player => {
+        if (
+            player.status === "cancelled-inactive" ||
+            player.status === "cancelled-refund-failed"
+        ) {
+            return;
+        }
+
         const total = handValue(player.hand);
         let result = "lose";
         let payout = 0;
@@ -2059,7 +2127,9 @@ function publicBlackjackState() {
         currentTurnId: active ? active.playerId : "",
         currentTurnName: active ? active.playerName : "",
         history: bj.history,
-        autoStartAt: bj.autoStartAt
+        autoStartAt: bj.autoStartAt,
+        turnExpiresAt: bj.turnExpiresAt || null,
+        turnTimeoutMs: BLACKJACK_TURN_TIMEOUT_MS
     };
 }
 
@@ -2810,6 +2880,8 @@ function startBlackjackRound() {
 
     if (bj.currentTurnIndex >= bj.players.length) {
         finishBlackjackRound();
+    } else {
+        scheduleBlackjackTurnTimeout();
     }
 
     return { ok: true };
@@ -5759,6 +5831,7 @@ app.post("/blackjack/start", (req, res) => {
         blackjackAutoTimer = null;
     }
 
+    clearBlackjackTurnTimer();
     state.blackjack.autoStartAt = null;
 
     const result = startBlackjackRound();
@@ -5780,11 +5853,14 @@ app.post("/blackjack/hit", (req, res) => {
 
     if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
 
+    clearBlackjackTurnTimer();
     player.hand.push(drawCard());
     const total = handValue(player.hand);
     if (total > 21) {
         player.status = "bust";
         moveToNextBlackjackTurn();
+    } else {
+        scheduleBlackjackTurnTimeout();
     }
 
     res.json({ ok: true, state: publicState() });
@@ -5796,6 +5872,7 @@ app.post("/blackjack/stand", (req, res) => {
 
     if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
 
+    clearBlackjackTurnTimer();
     player.status = "stand";
     moveToNextBlackjackTurn();
     res.json({ ok: true, state: publicState() });
@@ -5816,6 +5893,7 @@ app.post("/blackjack/reset", (req, res) => {
         blackjackAutoTimer = null;
     }
 
+    clearBlackjackTurnTimer();
     state.blackjack.autoStartAt = null;
 
     refundBets(
