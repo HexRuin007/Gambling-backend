@@ -954,6 +954,57 @@ function refundBets(bets, gameType, note) {
     }
 }
 
+function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = null, currentRequestCreatedAt = Date.now()) {
+    const id = cleanPlayerId(playerId);
+    const cutoff = Number(currentRequestCreatedAt || Date.now());
+
+    const previousRequest = state.chips.withdrawalRequests
+        .filter(request =>
+            cleanPlayerId(request.playerId) === id &&
+            request.withdrawalRequestId !== currentRequestId &&
+            Number(request.createdAt || request.updatedAt || 0) < cutoff
+        )
+        .sort((a, b) =>
+            Number(b.createdAt || b.updatedAt || 0) -
+            Number(a.createdAt || a.updatedAt || 0)
+        )[0] || null;
+
+    const sinceTimestamp = Number(
+        previousRequest?.createdAt ||
+        previousRequest?.updatedAt ||
+        0
+    );
+
+    const grants = state.chips.transactions.filter(transaction =>
+        cleanPlayerId(transaction.playerId) === id &&
+        transaction.type === "banker-grant" &&
+        Number(transaction.createdAt || 0) > sinceTimestamp &&
+        Number(transaction.createdAt || 0) <= cutoff
+    );
+
+    return {
+        hadPreviousWithdrawalRequest: Boolean(previousRequest),
+        previousWithdrawalRequestId:
+            previousRequest?.withdrawalRequestId || null,
+        previousWithdrawalRequestedAt:
+            previousRequest?.createdAt ||
+            previousRequest?.updatedAt ||
+            null,
+        bankerGrantedSinceLastWithdrawal: grants.length > 0,
+        bankerGrantCountSinceLastWithdrawal: grants.length,
+        bankerGrantAmountSinceLastWithdrawal: grants.reduce(
+            (total, transaction) =>
+                total + Math.max(0, Number(transaction.amount || 0)),
+            0
+        ),
+        latestBankerGrantAt: grants.reduce(
+            (latest, transaction) =>
+                Math.max(latest, Number(transaction.createdAt || 0)),
+            0
+        ) || null
+    };
+}
+
 function addDiscordEvent(type, data = {}) {
     const event = {
         eventId:
@@ -2785,6 +2836,8 @@ app.post("/chips/reset-player", (req, res) => {
 
     const playerName =
         state.chips.playerNames[playerId] || "Player";
+    const resetByName =
+        state.chips.playerNames[requesterId] || "Banker";
     const previousBalance = getChipBalance(playerId);
     const existed = Object.prototype.hasOwnProperty.call(
         state.chips.balances,
@@ -2883,6 +2936,14 @@ app.post("/chips/reset-player", (req, res) => {
     state.racing.history = state.racing.history.filter(
         entry => cleanPlayerId(entry.playerId) !== playerId
     );
+
+    addDiscordEvent("player-reset", {
+        playerId,
+        playerName,
+        previousBalance,
+        resetById: requesterId,
+        resetByName
+    });
 
     saveChipDataImmediately();
 
@@ -3214,6 +3275,15 @@ app.post("/chips/withdraw-request", (req, res) => {
             currentBalance;
         existing.updatedAt = Date.now();
 
+        const bankerGrantInfo =
+            getBankerGrantInfoSincePreviousWithdrawal(
+                playerId,
+                existing.withdrawalRequestId,
+                existing.createdAt
+            );
+
+        Object.assign(existing, bankerGrantInfo);
+
         addDiscordEvent("withdrawal-request", {
             withdrawalRequestId:
                 existing.withdrawalRequestId,
@@ -3221,7 +3291,8 @@ app.post("/chips/withdraw-request", (req, res) => {
             playerName,
             amount,
             currentBalance,
-            updated: true
+            updated: true,
+            ...bankerGrantInfo
         });
 
         queueChipSave();
@@ -3244,6 +3315,15 @@ app.post("/chips/withdraw-request", (req, res) => {
         createdAt: Date.now()
     };
 
+    const bankerGrantInfo =
+        getBankerGrantInfoSincePreviousWithdrawal(
+            playerId,
+            request.withdrawalRequestId,
+            request.createdAt
+        );
+
+    Object.assign(request, bankerGrantInfo);
+
     state.chips.withdrawalRequests.push(
         request
     );
@@ -3255,7 +3335,8 @@ app.post("/chips/withdraw-request", (req, res) => {
         playerName,
         amount,
         currentBalance,
-        updated: false
+        updated: false,
+        ...bankerGrantInfo
     });
 
     queueChipSave();
