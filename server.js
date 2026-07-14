@@ -76,7 +76,7 @@ const adminTokens = new Set();
 let wheelAutoTimer = null;
 let blackjackAutoTimer = null;
 let blackjackTurnTimer = null;
-const BLACKJACK_TURN_TIMEOUT_MS = 45_000;
+const BLACKJACK_TURN_TIMEOUT_MS = 20_000;
 let racingAutoTimer = null;
 let rouletteAutoTimer = null;
 
