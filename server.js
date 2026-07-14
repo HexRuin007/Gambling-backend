@@ -11,6 +11,7 @@ const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 20_000;
+const BLACKJACK_DECK_COUNT = 6;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
@@ -1891,27 +1892,38 @@ function publicWheelState() {
     };
 }
 
-function makeDeck() {
+function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     const suits = ["♠", "♥", "♦", "♣"];
     const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
-    const deck = [];
+    const shoe = [];
 
-    for (const suit of suits) {
-        for (const rank of ranks) {
-            deck.push({ rank, suit });
+    // Build a fresh multi-deck shoe for every round. Because bets are locked
+    // before any cards are exposed, cards from earlier rounds cannot be used
+    // to predict the next round.
+    for (let deckNumber = 0; deckNumber < deckCount; deckNumber++) {
+        for (const suit of suits) {
+            for (const rank of ranks) {
+                shoe.push({ rank, suit });
+            }
         }
     }
 
-    for (let i = deck.length - 1; i > 0; i--) {
+    // Fisher-Yates shuffle using cryptographically secure randomness.
+    for (let i = shoe.length - 1; i > 0; i--) {
         const j = crypto.randomInt(0, i + 1);
-        [deck[i], deck[j]] = [deck[j], deck[i]];
+        [shoe[i], shoe[j]] = [shoe[j], shoe[i]];
     }
 
-    return deck;
+    return shoe;
 }
 
 function drawCard() {
-    if (!state.blackjack.deck.length) state.blackjack.deck = makeDeck();
+    // This fallback should only be reached if an unusually large round uses
+    // all 312 cards. It creates another independently shuffled six-deck shoe.
+    if (!state.blackjack.deck.length) {
+        state.blackjack.deck = makeBlackjackShoe();
+    }
+
     return state.blackjack.deck.pop();
 }
 
@@ -2767,7 +2779,8 @@ function startBlackjackRound() {
     });
 
     bj.autoStartAt = null;
-    bj.deck = makeDeck();
+    // A brand-new six-deck shoe is generated for every round.
+    bj.deck = makeBlackjackShoe();
     bj.dealerHand = [drawCard(), drawCard()];
 
     bj.players = bj.bets.map(bet => {
