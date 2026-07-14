@@ -19,6 +19,7 @@ const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
 const MINES_MAX_COUNT = 24;
 const MINES_HOUSE_FACTOR = 0.97;
+const MINES_GROWTH_FACTOR = 0.70;
 const MINES_MAX_HISTORY = 100;
 const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
@@ -1567,10 +1568,17 @@ function getMinesMultiplier(mineCount, safeReveals) {
     const fairMultiplier =
         totalWays / safeWays;
 
+    // Slow down how quickly the multiplier rises after each safe tile.
+    // 0.70 means players receive 70% of the normal multiplier growth.
+    const reducedMultiplier =
+        1 +
+        (fairMultiplier - 1) *
+        MINES_GROWTH_FACTOR;
+
     return Math.max(
         1.01,
         Math.floor(
-            fairMultiplier *
+            reducedMultiplier *
             MINES_HOUSE_FACTOR *
             100
         ) / 100
