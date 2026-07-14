@@ -624,7 +624,8 @@ function addChipTransaction({
     amount,
     type,
     gameType = "",
-    note = ""
+    note = "",
+    grantType = null
 }) {
     const transaction = {
         transactionId: crypto.randomBytes(8).toString("hex"),
@@ -637,6 +638,10 @@ function addChipTransaction({
         type,
         gameType,
         note,
+        grantType:
+            grantType === "free" || grantType === "paid"
+                ? grantType
+                : null,
         balanceAfter: getChipBalance(playerId),
         createdAt: Date.now()
     };
@@ -785,7 +790,8 @@ function creditChips(playerId, amount, options = {}) {
             amount: value,
             type: options.type || "credit",
             gameType: options.gameType || "",
-            note: options.note || ""
+            note: options.note || "",
+            grantType: options.grantType || null
         });
 
         if (
@@ -982,6 +988,49 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
         Number(transaction.createdAt || 0) <= cutoff
     );
 
+    const paidGrants = grants.filter(
+        transaction => transaction.grantType === "paid"
+    );
+
+    const freeGrants = grants.filter(
+        transaction => transaction.grantType === "free"
+    );
+
+    // Older banker grants did not contain grantType. Keep them visible
+    // as unclassified rather than incorrectly calling them paid or free.
+    const unclassifiedGrants = grants.filter(
+        transaction =>
+            transaction.grantType !== "paid" &&
+            transaction.grantType !== "free"
+    );
+
+    const sumGrantAmounts = entries =>
+        entries.reduce(
+            (total, transaction) =>
+                total + Math.max(
+                    0,
+                    Number(transaction.amount || 0)
+                ),
+            0
+        );
+
+    const paidAmount = sumGrantAmounts(paidGrants);
+    const freeAmount = sumGrantAmounts(freeGrants);
+    const unclassifiedAmount =
+        sumGrantAmounts(unclassifiedGrants);
+
+    let bankerGrantClassification = "none";
+
+    if (paidGrants.length && freeGrants.length) {
+        bankerGrantClassification = "mixed";
+    } else if (paidGrants.length) {
+        bankerGrantClassification = "paid";
+    } else if (freeGrants.length) {
+        bankerGrantClassification = "free";
+    } else if (unclassifiedGrants.length) {
+        bankerGrantClassification = "unclassified";
+    }
+
     return {
         hadPreviousWithdrawalRequest: Boolean(previousRequest),
         previousWithdrawalRequestId:
@@ -990,16 +1039,35 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
             previousRequest?.createdAt ||
             previousRequest?.updatedAt ||
             null,
+
         bankerGrantedSinceLastWithdrawal: grants.length > 0,
+        bankerGrantClassification,
+
         bankerGrantCountSinceLastWithdrawal: grants.length,
-        bankerGrantAmountSinceLastWithdrawal: grants.reduce(
-            (total, transaction) =>
-                total + Math.max(0, Number(transaction.amount || 0)),
-            0
-        ),
+        bankerGrantAmountSinceLastWithdrawal:
+            sumGrantAmounts(grants),
+
+        paidBankerGrantCountSinceLastWithdrawal:
+            paidGrants.length,
+        paidBankerGrantAmountSinceLastWithdrawal:
+            paidAmount,
+
+        freeBankerGrantCountSinceLastWithdrawal:
+            freeGrants.length,
+        freeBankerGrantAmountSinceLastWithdrawal:
+            freeAmount,
+
+        unclassifiedBankerGrantCountSinceLastWithdrawal:
+            unclassifiedGrants.length,
+        unclassifiedBankerGrantAmountSinceLastWithdrawal:
+            unclassifiedAmount,
+
         latestBankerGrantAt: grants.reduce(
             (latest, transaction) =>
-                Math.max(latest, Number(transaction.createdAt || 0)),
+                Math.max(
+                    latest,
+                    Number(transaction.createdAt || 0)
+                ),
             0
         ) || null
     };
@@ -3150,6 +3218,13 @@ app.post("/chips/grant", (req, res) => {
     );
     let amount = cleanAmount(req.body?.amount);
 
+    const grantType =
+        String(req.body?.grantType || "paid")
+            .trim()
+            .toLowerCase() === "free"
+            ? "free"
+            : "paid";
+
     let request = null;
 
     if (requestId) {
@@ -3184,9 +3259,18 @@ app.post("/chips/grant", (req, res) => {
         {
             playerName,
             type: "banker-grant",
+            grantType,
             note: request
-                ? "Chip purchase request approved"
-                : "Chips manually granted by banker"
+                ? (
+                    grantType === "free"
+                        ? "Chip request approved as free chips"
+                        : "Paid chip purchase request approved"
+                )
+                : (
+                    grantType === "free"
+                        ? "Free chips manually granted by banker"
+                        : "Paid chips manually granted by banker"
+                )
         }
     );
 
@@ -3216,12 +3300,18 @@ app.post("/chips/grant", (req, res) => {
                 ? "approved-request"
                 : "manual-grant",
         requestId:
-            request?.requestId || null
+            request?.requestId || null,
+        grantType,
+        grantTypeLabel:
+            grantType === "free"
+                ? "Free chips"
+                : "Paid chips"
     });
 
     res.json({
         ok: true,
         playerId,
+        grantType,
         balance: getChipBalance(playerId),
         state: publicState()
     });
