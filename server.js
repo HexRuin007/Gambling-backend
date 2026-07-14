@@ -39,8 +39,8 @@ const DAILY_SPIN_PRIZES = [
     },
 
     { id: "grinder",
-        type: "item".
-            label: "Grinder Knife",
+        type: "item",
+            label: "GrinderKnife",
             itemName: "GrinderKnife",
      quantity: 1,
      oneTimeGlobal: true
