@@ -24,9 +24,18 @@ const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
+const MK15_DAILY_SPIN_ODDS = 100_000; // Exactly 1 in 1,000,000 while still available.
 
 
 const DAILY_SPIN_PRIZES = [
+    {
+        id: "mk15",
+        type: "item",
+        label: "MK15",
+        itemName: "MK15",
+        quantity: 1,
+        oneTimeGlobal: true
+    },
     { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
     { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 15 },
     { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 8 },
@@ -119,7 +128,8 @@ const state = {
         claims: {},
         bonusSpins: {},
         history: [],
-        deliveries: {}
+        deliveries: {},
+        oneTimeClaims: {}
     },
 
     wheel: {
@@ -300,6 +310,9 @@ function loadChipData() {
             if (saved.dailySpin.deliveries && typeof saved.dailySpin.deliveries === "object") {
                 state.dailySpin.deliveries = saved.dailySpin.deliveries;
             }
+            if (saved.dailySpin.oneTimeClaims && typeof saved.dailySpin.oneTimeClaims === "object") {
+                state.dailySpin.oneTimeClaims = saved.dailySpin.oneTimeClaims;
+            }
         }
 
         console.log(
@@ -359,7 +372,8 @@ function saveChipDataImmediately() {
                 claims: state.dailySpin.claims,
                 bonusSpins: state.dailySpin.bonusSpins,
                 history: state.dailySpin.history,
-                deliveries: state.dailySpin.deliveries
+                deliveries: state.dailySpin.deliveries,
+                oneTimeClaims: state.dailySpin.oneTimeClaims
             },
             savedAt: Date.now()
         };
@@ -2220,8 +2234,35 @@ function finishChickenGame(
     queueChipSave();
 }
 
+function isDailySpinPrizeAvailable(prize) {
+    return !(
+        prize.oneTimeGlobal &&
+        state.dailySpin.oneTimeClaims[prize.id]
+    );
+}
+
 function pickDailySpinPrize() {
-    const totalWeight = DAILY_SPIN_PRIZES.reduce(
+    const mk15Prize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "mk15"
+    );
+
+    // The MK15 gets a completely separate jackpot roll so adding it does
+    // not alter any of the normal daily-spin prize percentages.
+    if (
+        mk15Prize &&
+        isDailySpinPrizeAvailable(mk15Prize) &&
+        crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
+    ) {
+        return mk15Prize;
+    }
+
+    const availablePrizes = DAILY_SPIN_PRIZES.filter(
+        prize =>
+            isDailySpinPrizeAvailable(prize) &&
+            !prize.oneTimeGlobal
+    );
+
+    const totalWeight = availablePrizes.reduce(
         (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
         0
     );
@@ -2232,21 +2273,24 @@ function pickDailySpinPrize() {
 
     let roll = crypto.randomInt(1, totalWeight + 1);
 
-    for (const prize of DAILY_SPIN_PRIZES) {
+    for (const prize of availablePrizes) {
         roll -= Math.max(0, Number(prize.weight || 0));
         if (roll <= 0) return prize;
     }
 
-    return DAILY_SPIN_PRIZES[DAILY_SPIN_PRIZES.length - 1];
+    return availablePrizes[availablePrizes.length - 1];
 }
 
 function publicDailySpinPrizes() {
-    return DAILY_SPIN_PRIZES.map(prize => ({
+    return DAILY_SPIN_PRIZES
+        .filter(isDailySpinPrizeAvailable)
+        .map(prize => ({
         id: prize.id,
         type: prize.type,
         label: prize.label,
         amount: prize.type === "chips" ? Number(prize.amount || 0) : undefined,
-        quantity: prize.type === "item" ? Number(prize.quantity || 1) : undefined
+        quantity: prize.type === "item" ? Number(prize.quantity || 1) : undefined,
+        oneTimeGlobal: Boolean(prize.oneTimeGlobal)
     }));
 }
 
@@ -2766,6 +2810,8 @@ app.post("/chips/reset-all", (req, res) => {
     state.dailySpin.claims = {};
     state.dailySpin.history = [];
     state.dailySpin.deliveries = {};
+    // Intentionally keep dailySpin.oneTimeClaims so globally unique
+    // prizes such as the MK15 can never return after being won.
 
     state.wheel.bets = [];
     state.wheel.history = [];
@@ -3315,6 +3361,20 @@ app.post("/daily-spin/spin", (req, res) => {
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
     let deliveryId = null;
+
+    if (prize.oneTimeGlobal) {
+        // Claim it synchronously before creating the delivery so no later
+        // spin can win the same globally unique prize.
+        state.dailySpin.oneTimeClaims[prize.id] = {
+            prizeId: prize.id,
+            prizeLabel: prize.label,
+            spinId,
+            playerId,
+            playerName,
+            claimedAt: createdAt
+        };
+        saveChipDataImmediately();
+    }
 
     if (prize.type === "chips") {
         const amount = cleanAmount(prize.amount);
@@ -4143,8 +4203,8 @@ app.post("/chicken/cross", (req, res) => {
         game.currentStep === 0;
 
     const roll =
-        crypto.randomInt(0, 1_000_000) /
-        1_000_000;
+        crypto.randomInt(0, 100_000) /
+        100_000;
 
     if (
         !isFirstCross &&
