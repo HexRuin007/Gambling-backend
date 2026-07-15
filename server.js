@@ -11,7 +11,8 @@ const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
 const AUTO_START_DELAY_MS = 10_000;
-const BLACKJACK_DECK_COUNT = 6;
+const BLACKJACK_DECK_COUNT = 1;
+const SLOT_MIN_WIN_PROFIT_RATE = 0.01;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
@@ -1951,6 +1952,14 @@ function drawCard(excludedCards = []) {
     ];
 
     const [card] = state.blackjack.deck.splice(pickedIndex, 1);
+
+   
+    for (let i = state.blackjack.deck.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [state.blackjack.deck[i], state.blackjack.deck[j]] =
+            [state.blackjack.deck[j], state.blackjack.deck[i]];
+    }
+
     return card;
 }
 
@@ -2894,7 +2903,7 @@ function startBlackjackRound() {
 
     bj.autoStartAt = null;
 
-    bj.deck = makeBlackjackShoe();
+    bj.deck = makeBlackjackShoe(1);
     bj.dealerHand = [];
     bj.dealerHand.push(drawDealerCard());
     bj.dealerHand.push(drawDealerCard());
@@ -4576,10 +4585,17 @@ app.post("/slots/spin", (req, res) => {
             ? evaluation.payout + betAmount
             : 0;
 
+
+    const minimumWinningPayout =
+        betAmount + Math.max(
+            1,
+            Math.ceil(betAmount * SLOT_MIN_WIN_PROFIT_RATE)
+        );
+
     const creditedPayout =
         unadjustedGrossPayout > 0
             ? Math.max(
-                1,
+                minimumWinningPayout,
                 Math.floor(
                     unadjustedGrossPayout *
                     SLOT_PAYOUT_FACTOR
