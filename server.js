@@ -15,8 +15,8 @@ const BLACKJACK_DECK_COUNT = 6;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
-const SLOT_TARGET_RTP = 0.87;
-const SLOT_PAYOUT_FACTOR = 0.845;
+const SLOT_TARGET_RTP = 0.92;
+const SLOT_PAYOUT_FACTOR = 0.92;
 const SLOT_FREE_SPINS_AWARD = { 3: 3, 4: 5, 5: 8 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
@@ -1308,22 +1308,40 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-   
-   { id: "pear", label: "🍐", weight: 34, pays: { 3: 1, 4: 3, 5: 10 } },
-    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 1, 4: 4, 5: 14 } },
-    { id: "bell", label: "🔔", weight: 22, pays: { 3: 2, 4: 6, 5: 20 } },
-    { id: "gem", label: "💎", weight: 16, pays: { 3: 2, 4: 8, 5: 30 } },
-    { id: "crown", label: "👑", weight: 11, pays: { 3: 3, 4: 12, 5: 50 } },
-    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 5, 4: 20, 5: 100 } },
-    { id: "wild", label: "🃏", weight: 5, pays: { 3: 8, 4: 40, 5: 200 } },
-
-   
-    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 1, 4: 5, 5: 20 } }
+    // Increased line-win values so ordinary wins feel worthwhile.
+    { id: "pear", label: "🍐", weight: 34, pays: { 3: 2, 4: 5, 5: 15 } },
+    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 2, 4: 6, 5: 20 } },
+    { id: "bell", label: "🔔", weight: 22, pays: { 3: 3, 4: 9, 5: 30 } },
+    { id: "gem", label: "💎", weight: 16, pays: { 3: 4, 4: 12, 5: 45 } },
+    { id: "crown", label: "👑", weight: 11, pays: { 3: 5, 4: 18, 5: 75 } },
+    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 8, 4: 30, 5: 150 } },
+    { id: "wild", label: "🃏", weight: 5, pays: { 3: 12, 4: 60, 5: 300 } },
+    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 2, 4: 8, 5: 30 } }
 ];
 
+// Expanded from 10 to 20 unique paylines. More reel patterns can now win,
+// while the player's total bet is still divided evenly across every line.
 const SLOT_PAYLINES = [
-    [1,1,1,1,1], [0,0,0,0,0], [2,2,2,2,2], [0,1,2,1,0], [2,1,0,1,2],
-    [0,0,1,2,2], [2,2,1,0,0], [1,0,0,0,1], [1,2,2,2,1], [0,1,1,1,0]
+    [1,1,1,1,1],
+    [0,0,0,0,0],
+    [2,2,2,2,2],
+    [0,1,2,1,0],
+    [2,1,0,1,2],
+    [0,0,1,2,2],
+    [2,2,1,0,0],
+    [1,0,0,0,1],
+    [1,2,2,2,1],
+    [0,1,1,1,0],
+    [2,1,1,1,2],
+    [0,1,0,1,0],
+    [2,1,2,1,2],
+    [1,0,1,0,1],
+    [1,2,1,2,1],
+    [0,2,0,2,0],
+    [2,0,2,0,2],
+    [0,2,1,2,0],
+    [2,0,1,0,2],
+    [1,0,2,0,1]
 ];
 
 function pickSlotSymbol() {
