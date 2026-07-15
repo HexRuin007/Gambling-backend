@@ -55,7 +55,7 @@ const DAILY_SPIN_PRIZES = [
 
    
     { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
-    { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "250K x Random BXP", quantity: 1, weight: 1 },
+    { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "25K x Random BXP", quantity: 1, weight: 1 },
 
     { id: "nothing", type: "nothing", label: "Nothing", weight: 26 }
 ];
