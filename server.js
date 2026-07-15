@@ -112,7 +112,9 @@ const state = {
         transactions: [],
         grantTypeTrackingStartedAt: 0,
         dailyHouseStats: {},
-        leaderboardStats: {}
+        leaderboardStats: {},
+        fundingBalances: {},
+        lastBetFunding: {}
     },
     slots: {
         history: [],
@@ -275,6 +277,13 @@ function loadChipData() {
                 saved.leaderboardStats;
         }
 
+        if (saved.fundingBalances && typeof saved.fundingBalances === "object") {
+            state.chips.fundingBalances = saved.fundingBalances;
+        }
+
+        
+        state.chips.lastBetFunding = {};
+
         if (saved.slots && typeof saved.slots === "object") {
             if (Array.isArray(saved.slots.history)) {
                 state.slots.history = saved.slots.history.slice(0, SLOT_MAX_HISTORY);
@@ -390,6 +399,7 @@ function saveChipDataImmediately() {
                 state.chips.grantTypeTrackingStartedAt,
             dailyHouseStats: state.chips.dailyHouseStats,
             leaderboardStats: state.chips.leaderboardStats,
+            fundingBalances: state.chips.fundingBalances,
             slots: {
                 history: state.slots.history,
                 freeSpins: state.slots.freeSpins,
@@ -461,6 +471,8 @@ function getOrCreateDailyHouseStats(dateKey = getUtcDateKey()) {
             payouts: 0,
             refunds: 0,
             profit: 0,
+            realMoney: { bets: 0, payouts: 0, refunds: 0, profit: 0 },
+            promotional: { bets: 0, payouts: 0, refunds: 0, profit: 0 },
             games: {}
         };
     }
@@ -468,59 +480,129 @@ function getOrCreateDailyHouseStats(dateKey = getUtcDateKey()) {
     return state.chips.dailyHouseStats[dateKey];
 }
 
+function normaliseFundingBreakdown(breakdown, totalAmount) {
+    const total = Math.max(0, Math.floor(Number(totalAmount || 0)));
+    const real = Math.max(0, Math.min(total, Math.floor(Number(breakdown?.real || 0))));
+    const promo = Math.max(0, Math.min(total - real, Math.floor(Number(breakdown?.promo || 0))));
+    const missing = total - real - promo;
+
+    return { real: real + missing, promo };
+}
+
 function recordHouseMovement({
     amount,
     movement,
-    gameType = ""
+    gameType = "",
+    funding = null
 }) {
     const value = parseChipAmount(amount);
 
-    if (
-        !Number.isSafeInteger(value) ||
-        value <= 0 ||
-        !gameType
-    ) {
-        return;
-    }
+    if (!Number.isSafeInteger(value) || value <= 0 || !gameType) return;
 
     const stats = getOrCreateDailyHouseStats();
+    stats.realMoney ||= { bets: 0, payouts: 0, refunds: 0, profit: 0 };
+    stats.promotional ||= { bets: 0, payouts: 0, refunds: 0, profit: 0 };
+
     const game = stats.games[gameType] || {
         bets: 0,
         payouts: 0,
         refunds: 0,
-        profit: 0
+        profit: 0,
+        realMoney: { bets: 0, payouts: 0, refunds: 0, profit: 0 },
+        promotional: { bets: 0, payouts: 0, refunds: 0, profit: 0 }
+    };
+    game.realMoney ||= { bets: 0, payouts: 0, refunds: 0, profit: 0 };
+    game.promotional ||= { bets: 0, payouts: 0, refunds: 0, profit: 0 };
+
+    const split = normaliseFundingBreakdown(funding, value);
+    const apply = (target, sourceValue, sign) => {
+        target[movement === "bet" ? "bets" : movement === "payout" ? "payouts" : "refunds"] += sourceValue;
+        target.profit += sourceValue * sign;
     };
 
-    if (movement === "bet") {
-        stats.bets += value;
-        stats.profit += value;
-        game.bets += value;
-        game.profit += value;
-    } else if (movement === "payout") {
-        stats.payouts += value;
-        stats.profit -= value;
-        game.payouts += value;
-        game.profit -= value;
-    } else if (movement === "refund") {
-        stats.refunds += value;
-        stats.profit -= value;
-        game.refunds += value;
-        game.profit -= value;
-    } else {
-        return;
-    }
+    const sign = movement === "bet" ? 1 : movement === "payout" || movement === "refund" ? -1 : 0;
+    if (!sign) return;
+
+    if (movement === "bet") stats.bets += value;
+    if (movement === "payout") stats.payouts += value;
+    if (movement === "refund") stats.refunds += value;
+    stats.profit += value * sign;
+
+    if (movement === "bet") game.bets += value;
+    if (movement === "payout") game.payouts += value;
+    if (movement === "refund") game.refunds += value;
+    game.profit += value * sign;
+
+    apply(stats.realMoney, split.real, sign);
+    apply(stats.promotional, split.promo, sign);
+    apply(game.realMoney, split.real, sign);
+    apply(game.promotional, split.promo, sign);
 
     stats.games[gameType] = game;
 
-   
-    const keys = Object.keys(
-        state.chips.dailyHouseStats
-    ).sort();
-
+    const keys = Object.keys(state.chips.dailyHouseStats).sort();
     while (keys.length > 370) {
         const oldest = keys.shift();
         delete state.chips.dailyHouseStats[oldest];
     }
+}
+
+function getFundingBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    const currentBalance = Math.max(0, Math.floor(Number(state.chips.balances[id] || 0)));
+    const saved = state.chips.fundingBalances[id];
+
+    if (!saved) {
+      
+        state.chips.fundingBalances[id] = { real: currentBalance, promo: 0 };
+    }
+
+    const funding = state.chips.fundingBalances[id];
+    funding.real = Math.max(0, Math.floor(Number(funding.real || 0)));
+    funding.promo = Math.max(0, Math.floor(Number(funding.promo || 0)));
+
+    const difference = currentBalance - funding.real - funding.promo;
+    if (difference > 0) funding.real += difference;
+    if (difference < 0) {
+        const removePromo = Math.min(funding.promo, Math.abs(difference));
+        funding.promo -= removePromo;
+        funding.real = Math.max(0, funding.real - (Math.abs(difference) - removePromo));
+    }
+
+    return funding;
+}
+
+function classifyCreditSource(options = {}) {
+    if (options.fundingSource === "promo" || options.fundingSource === "real") {
+        return options.fundingSource;
+    }
+    if (options.type === "welcome-bonus" || options.type === "daily-spin-prize") return "promo";
+    if (options.type === "banker-grant") return options.grantType === "free" ? "promo" : "real";
+    return "real";
+}
+
+function allocateBetFunding(playerId, amount) {
+    const funding = getFundingBalance(playerId);
+    const total = funding.real + funding.promo;
+    const value = Math.max(0, Math.floor(Number(amount || 0)));
+    if (!total || !value) return { real: value, promo: 0 };
+
+    const promo = Math.min(funding.promo, Math.floor(value * (funding.promo / total)));
+    const real = value - promo;
+    funding.real = Math.max(0, funding.real - real);
+    funding.promo = Math.max(0, funding.promo - promo);
+    return { real, promo };
+}
+
+function getPayoutFunding(playerId, gameType, payoutAmount) {
+    const id = cleanPlayerId(playerId);
+    const wager = state.chips.lastBetFunding[id]?.[gameType];
+    const payout = Math.max(0, Math.floor(Number(payoutAmount || 0)));
+    if (!wager || !wager.amount) return { real: payout, promo: 0 };
+
+    const promo = Math.min(payout, Math.floor(payout * (wager.promo / wager.amount)));
+    delete state.chips.lastBetFunding[id][gameType];
+    return { real: payout - promo, promo };
 }
 
 function cleanPlayerId(value) {
@@ -609,8 +691,11 @@ function rememberPlayer(playerId, playerName) {
         return;
     }
 
-    state.chips.balances[id] =
-        NEW_PLAYER_STARTING_CHIPS;
+    state.chips.balances[id] = NEW_PLAYER_STARTING_CHIPS;
+    state.chips.fundingBalances[id] = {
+        real: 0,
+        promo: NEW_PLAYER_STARTING_CHIPS
+    };
 
     state.chips.transactions.unshift({
         transactionId:
@@ -812,9 +897,24 @@ function creditChips(playerId, amount, options = {}) {
         return false;
     }
 
+    const funding = getFundingBalance(id);
     state.chips.balances[id] = next;
 
     if (value > 0) {
+        const source = classifyCreditSource(options);
+        let creditedFunding = { real: 0, promo: 0 };
+
+        if ((options.type === "payout" || options.type === "bet-refund") && options.gameType) {
+            creditedFunding = getPayoutFunding(id, options.gameType, value);
+        } else if (source === "promo") {
+            creditedFunding.promo = value;
+        } else {
+            creditedFunding.real = value;
+        }
+
+        funding.real += creditedFunding.real;
+        funding.promo += creditedFunding.promo;
+
         addChipTransaction({
             playerId: id,
             playerName: options.playerName,
@@ -838,7 +938,8 @@ function creditChips(playerId, amount, options = {}) {
             recordHouseMovement({
                 amount: value,
                 movement: "payout",
-                gameType: options.gameType
+                gameType: options.gameType,
+                funding: creditedFunding
             });
         } else if (
             options.type === "bet-refund" &&
@@ -853,7 +954,8 @@ function creditChips(playerId, amount, options = {}) {
             recordHouseMovement({
                 amount: value,
                 movement: "refund",
-                gameType: options.gameType
+                gameType: options.gameType,
+                funding: creditedFunding
             });
         }
     }
@@ -887,6 +989,27 @@ function debitChips(playerId, amount, options = {}) {
 
     state.chips.balances[id] = balance - value;
 
+    let debitedFunding;
+    if ((options.type === "bet" || options.type === "bet-adjustment") && options.gameType) {
+        debitedFunding = allocateBetFunding(id, value);
+        state.chips.lastBetFunding[id] ||= {};
+        const previous = options.type === "bet-adjustment"
+            ? (state.chips.lastBetFunding[id][options.gameType] || { amount: 0, real: 0, promo: 0 })
+            : { amount: 0, real: 0, promo: 0 };
+        state.chips.lastBetFunding[id][options.gameType] = {
+            amount: previous.amount + value,
+            real: previous.real + debitedFunding.real,
+            promo: previous.promo + debitedFunding.promo
+        };
+    } else {
+        const funding = getFundingBalance(id);
+        const real = Math.min(funding.real, value);
+        const promo = value - real;
+        funding.real -= real;
+        funding.promo = Math.max(0, funding.promo - promo);
+        debitedFunding = { real, promo };
+    }
+
     addChipTransaction({
         playerId: id,
         playerName: options.playerName,
@@ -912,7 +1035,8 @@ function debitChips(playerId, amount, options = {}) {
         recordHouseMovement({
             amount: value,
             movement: "bet",
-            gameType: options.gameType
+            gameType: options.gameType,
+            funding: debitedFunding
         });
     }
 
@@ -3232,19 +3356,24 @@ app.get("/chips/daily-profit", (req, res) => {
         });
     }
 
-    const stats =
-        state.chips.dailyHouseStats[requestedDate] || {
-            date: requestedDate,
-            bets: 0,
-            payouts: 0,
-            refunds: 0,
-            profit: 0,
-            games: {}
-        };
+    const stats = state.chips.dailyHouseStats[requestedDate] || {
+        date: requestedDate,
+        bets: 0,
+        payouts: 0,
+        refunds: 0,
+        profit: 0,
+        realMoney: { bets: 0, payouts: 0, refunds: 0, profit: 0 },
+        promotional: { bets: 0, payouts: 0, refunds: 0, profit: 0 },
+        games: {}
+    };
+
+    stats.realMoney ||= { bets: stats.bets || 0, payouts: stats.payouts || 0, refunds: stats.refunds || 0, profit: stats.profit || 0 };
+    stats.promotional ||= { bets: 0, payouts: 0, refunds: 0, profit: 0 };
 
     res.json({
         ok: true,
         timezone: "UTC",
+        trackingNote: "Source split is accurate for bets placed after this update. Existing balances are treated as paid/real chips.",
         stats
     });
 });
@@ -3297,6 +3426,8 @@ app.post("/chips/reset-player", (req, res) => {
     delete state.chips.balances[playerId];
     delete state.chips.playerNames[playerId];
     delete state.chips.leaderboardStats[playerId];
+    delete state.chips.fundingBalances[playerId];
+    delete state.chips.lastBetFunding[playerId];
 
     state.chips.requests = state.chips.requests.filter(
         request => cleanPlayerId(request.playerId) !== playerId
@@ -3446,6 +3577,8 @@ app.post("/chips/reset-all", (req, res) => {
     state.chips.transactions = [];
     state.chips.dailyHouseStats = {};
     state.chips.leaderboardStats = {};
+    state.chips.fundingBalances = {};
+    state.chips.lastBetFunding = {};
 
     state.slots.freeSpins = {};
     state.slots.lastPaidBet = {};
