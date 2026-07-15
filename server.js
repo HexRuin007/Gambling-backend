@@ -1923,14 +1923,52 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     return shoe;
 }
 
-function drawCard() {
+function drawCard(excludedCards = []) {
     // This fallback should only be reached if an unusually large round uses
     // all 312 cards. It creates another independently shuffled six-deck shoe.
     if (!state.blackjack.deck.length) {
         state.blackjack.deck = makeBlackjackShoe();
     }
 
-    return state.blackjack.deck.pop();
+    const excludedKeys = new Set(
+        excludedCards.map(card => `${card.rank}|${card.suit}`)
+    );
+
+    const validIndexes = [];
+
+    for (let index = 0; index < state.blackjack.deck.length; index++) {
+        const card = state.blackjack.deck[index];
+        const key = `${card.rank}|${card.suit}`;
+
+        if (!excludedKeys.has(key)) {
+            validIndexes.push(index);
+        }
+    }
+
+    // A dealer hand can never exhaust all 52 unique rank/suit combinations,
+    // but rebuild the shoe safely if no valid card is available.
+    if (!validIndexes.length) {
+        state.blackjack.deck = makeBlackjackShoe();
+        return drawCard(excludedCards);
+    }
+
+    // Pick uniformly from every currently valid card in the shoe. This keeps
+    // the result cryptographically random while preventing an identical
+    // rank-and-suit card from appearing twice in the supplied hand.
+    const pickedIndex = validIndexes[
+        crypto.randomInt(0, validIndexes.length)
+    ];
+
+    const [card] = state.blackjack.deck.splice(pickedIndex, 1);
+    return card;
+}
+
+function drawDealerCard() {
+    return drawCard(state.blackjack.dealerHand);
+}
+
+function drawPlayerCard(hand) {
+    return drawCard(hand);
 }
 
 function handValue(hand) {
@@ -2038,7 +2076,7 @@ function finishBlackjackRound() {
     bj.currentTurnIndex = -1;
 
     while (handValue(bj.dealerHand) < 17) {
-        bj.dealerHand.push(drawCard());
+        bj.dealerHand.push(drawDealerCard());
     }
 
     const dealerTotal = handValue(bj.dealerHand);
@@ -2648,14 +2686,27 @@ function pickDailySpinPrize() {
         prize => prize.id === "mk15"
     );
 
-    // The MK15 gets a completely separate jackpot roll so adding it does
-    // not alter any of the normal daily-spin prize percentages.
+    // Separate 1-in-100,000 MK15 jackpot roll.
     if (
         mk15Prize &&
         isDailySpinPrizeAvailable(mk15Prize) &&
         crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
     ) {
         return mk15Prize;
+    }
+
+    const grinderPrize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "grinder"
+    );
+
+    // Separate 1-in-10,000 GrinderKnife jackpot roll.
+    // Once won, oneTimeClaims permanently removes it from future spins.
+    if (
+        grinderPrize &&
+        isDailySpinPrizeAvailable(grinderPrize) &&
+        crypto.randomInt(0, Grinder_DAILY_SPIN_ODDS) === 0
+    ) {
+        return grinderPrize;
     }
 
     const availablePrizes = DAILY_SPIN_PRIZES.filter(
@@ -2853,12 +2904,16 @@ function startBlackjackRound() {
     });
 
     bj.autoStartAt = null;
-    // A brand-new six-deck shoe is generated for every round.
+
     bj.deck = makeBlackjackShoe();
-    bj.dealerHand = [drawCard(), drawCard()];
+    bj.dealerHand = [];
+    bj.dealerHand.push(drawDealerCard());
+    bj.dealerHand.push(drawDealerCard());
 
     bj.players = bj.bets.map(bet => {
-        const hand = [drawCard(), drawCard()];
+        const hand = [];
+        hand.push(drawPlayerCard(hand));
+        hand.push(drawPlayerCard(hand));
         const total = handValue(hand);
 
         return {
@@ -3074,7 +3129,7 @@ app.post("/admin-login", (req, res) => {
     res.json({ ok: true, token });
 });
 
-// Chip routes
+
 
 app.post("/chips/register-player", (req, res) => {
     const playerId = cleanPlayerId(
@@ -3295,8 +3350,6 @@ app.post("/chips/reset-player", (req, res) => {
         }
     }
 
-    // oneTimeClaims is intentionally retained. Globally unique prizes
-    // such as the MK15 must remain permanently claimed.
 
     state.wheel.bets = state.wheel.bets.filter(
         bet => cleanPlayerId(bet.playerId) !== playerId
@@ -3420,8 +3473,7 @@ app.post("/chips/reset-all", (req, res) => {
     state.dailySpin.claims = {};
     state.dailySpin.history = [];
     state.dailySpin.deliveries = {};
-    // Intentionally keep dailySpin.oneTimeClaims so globally unique
-    // prizes such as the MK15 can never return after being won.
+   
 
     state.wheel.bets = [];
     state.wheel.history = [];
@@ -3924,7 +3976,7 @@ app.post("/chips/set-balance", (req, res) => {
     });
 });
 
-// Daily spin routes
+
 
 app.post("/daily-spin/grant", (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -4015,8 +4067,7 @@ app.post("/daily-spin/spin", (req, res) => {
     let deliveryId = null;
 
     if (prize.oneTimeGlobal) {
-        // Claim it synchronously before creating the delivery so no later
-        // spin can win the same globally unique prize.
+      
         state.dailySpin.oneTimeClaims[prize.id] = {
             prizeId: prize.id,
             prizeLabel: prize.label,
@@ -4134,7 +4185,7 @@ app.post("/discord/daily-spin/delivered", (req, res) => {
     res.json({ ok: true, delivery: { ...delivery } });
 });
 
-// Discord bot chip-request routes
+
 
 app.get("/discord/chips/events", (req, res) => {
     if (!requireDiscordBot(req, res)) return;
@@ -4480,7 +4531,7 @@ app.post(
     }
 );
 
-// Slot routes
+
 app.post("/slots/spin", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
     const playerName = cleanPlayerName(req.body?.playerName);
@@ -4529,11 +4580,7 @@ app.post("/slots/spin", (req, res) => {
             Math.max(0, Number(state.slots.freeSpins[playerId] || 0)) + evaluation.freeSpinsAwarded;
     }
 
-    // Free spins are not charged, but they gamble the triggering paid-spin
-    // stake and receive the exact same gross payout as a paid spin.
-    // The original slot maths, including nudges and free spins, returns
-    // roughly 103% before adjustment. Scale all gross wins so the complete
-    // feature settles at approximately the requested 87% long-term RTP.
+ 
     const unadjustedGrossPayout =
         evaluation.payout > 0
             ? evaluation.payout + betAmount
@@ -4616,7 +4663,7 @@ app.post("/slots/spin", (req, res) => {
 });
 
 
-// Roulette routes
+
 
 app.post("/roulette/place-bet", (req, res) => {
     const roulette = ensureRouletteState();
@@ -4880,9 +4927,7 @@ app.post("/chicken/cross", (req, res) => {
         CHICKEN_RISKS[game.risk] ||
         CHICKEN_RISKS.medium;
 
-    // The first lane is always safe so a newly started game
-    // cannot immediately end on the player's first crossing.
-    // Risk begins from the second lane onward.
+   
     const isFirstCross =
         game.currentStep === 0;
 
@@ -5045,7 +5090,7 @@ app.post("/chicken/cashout", (req, res) => {
     });
 });
 
-// Deal game routes
+
 
 
 
@@ -5255,8 +5300,7 @@ app.post("/deal/accept", (req, res) => {
 
     const payout = game.currentOffer;
 
-    // Preserve the hidden case layout before finishDealGame removes
-    // the active game. This is only returned after the player accepts.
+  
     const allCaseValues = [...game.caseValues];
     const chosenCase = game.chosenCase;
     const chosenValue = game.caseValues[chosenCase];
@@ -5311,7 +5355,7 @@ app.post("/deal/reject", (req, res) => {
     });
 });
 
-// Mines routes
+
 
 app.post("/mines/start", (req, res) => {
     const playerId = cleanPlayerId(
@@ -5735,7 +5779,7 @@ app.post("/spin", (req, res) => {
     });
 });
 
-// Blackjack routes
+
 app.post("/blackjack/place-bet", (req, res) => {
     const bj = state.blackjack;
 
@@ -5875,7 +5919,7 @@ app.post("/blackjack/hit", (req, res) => {
     if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
 
     clearBlackjackTurnTimer();
-    player.hand.push(drawCard());
+    player.hand.push(drawPlayerCard(player.hand));
     const total = handValue(player.hand);
     if (total > 21) {
         player.status = "bust";
@@ -5936,7 +5980,7 @@ app.post("/blackjack/reset", (req, res) => {
     });
 });
 
-// Horse racing routes
+
 app.post("/racing/place-bet", (req, res) => {
     const race = state.racing;
 
