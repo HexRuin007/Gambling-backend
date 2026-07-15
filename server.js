@@ -15,8 +15,8 @@ const BLACKJACK_DECK_COUNT = 6;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
-const SLOT_TARGET_RTP = 0.92;
-const SLOT_PAYOUT_FACTOR = 0.92;
+const SLOT_TARGET_RTP = 0.90;
+const SLOT_PAYOUT_FACTOR = 0.90;
 const SLOT_FREE_SPINS_AWARD = { 3: 3, 4: 5, 5: 8 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
@@ -84,8 +84,7 @@ let rouletteAutoTimer = null;
 
 
 const wheel = [
-    // 55% losing outcomes, 5% break-even outcomes and 40% winning outcomes.
-    // Weighted average payout is approximately 89.4%, reduced from 106.2%.
+  
     { multiplier: 0,    weight: 15 },
     { multiplier: 0.1,  weight: 14 },
     { multiplier: 0.25, weight: 11 },
@@ -163,7 +162,7 @@ const state = {
         players: [],
         dealerHand: [],
         deck: [],
-        status: "waiting", // waiting, playing, finished
+        status: "waiting", 
         currentTurnIndex: 0,
         history: [],
         autoStartAt: null
@@ -247,8 +246,7 @@ function loadChipData() {
             state.chips.grantTypeTrackingStartedAt =
                 Number(saved.grantTypeTrackingStartedAt);
         } else {
-            // First deployment of paid/free grant tracking:
-            // ignore every banker grant created before this moment.
+        
             state.chips.grantTypeTrackingStartedAt =
                 Date.now();
 
@@ -513,7 +511,7 @@ function recordHouseMovement({
 
     stats.games[gameType] = game;
 
-    // Keep roughly one year of daily records.
+   
     const keys = Object.keys(
         state.chips.dailyHouseStats
     ).sort();
@@ -739,8 +737,7 @@ function updateGamblerStats(
         stats.refunds += value;
     }
 
-    // Positive = net chips lost to the casino.
-    // Negative = the player is in overall profit.
+   
     stats.moneyLost =
         stats.moneySpent -
         stats.payouts -
@@ -1018,8 +1015,7 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
         state.chips.grantTypeTrackingStartedAt || 0
     );
 
-    // Only count grants made after paid/free tracking was enabled.
-    // This permanently excludes all historical unclassified grants.
+
     const sinceTimestamp = Math.max(
         previousWithdrawalTimestamp,
         trackingStartedAt
@@ -1044,7 +1040,7 @@ function getBankerGrantInfoSincePreviousWithdrawal(playerId, currentRequestId = 
         transaction => transaction.grantType === "free"
     );
 
-    // Historical grants without a paid/free type are deliberately ignored.
+    
     const unclassifiedGrants = [];
 
     const sumGrantAmounts = entries =>
@@ -1308,19 +1304,17 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-    // Increased line-win values so ordinary wins feel worthwhile.
-    { id: "pear", label: "🍐", weight: 34, pays: { 3: 2, 4: 5, 5: 15 } },
-    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 2, 4: 6, 5: 20 } },
-    { id: "bell", label: "🔔", weight: 22, pays: { 3: 3, 4: 9, 5: 30 } },
-    { id: "gem", label: "💎", weight: 16, pays: { 3: 4, 4: 12, 5: 45 } },
-    { id: "crown", label: "👑", weight: 11, pays: { 3: 5, 4: 18, 5: 75 } },
-    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 8, 4: 30, 5: 150 } },
-    { id: "wild", label: "🃏", weight: 5, pays: { 3: 12, 4: 60, 5: 300 } },
-    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 2, 4: 8, 5: 30 } }
+   
+    { id: "pear", label: "🍐", weight: 34, pays: { 3: 1.5, 4: 4, 5: 12 } },
+    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 1.5, 4: 5, 5: 16 } },
+    { id: "bell", label: "🔔", weight: 22, pays: { 3: 2, 4: 7, 5: 24 } },
+    { id: "gem", label: "💎", weight: 16, pays: { 3: 3, 4: 10, 5: 36 } },
+    { id: "crown", label: "👑", weight: 11, pays: { 3: 4, 4: 14, 5: 60 } },
+    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 6, 4: 24, 5: 120 } },
+    { id: "wild", label: "🃏", weight: 5, pays: { 3: 10, 4: 45, 5: 240 } },
+    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 1.5, 4: 6, 5: 24 } }
 ];
 
-// Expanded from 10 to 20 unique paylines. More reel patterns can now win,
-// while the player's total bet is still divided evenly across every line.
 const SLOT_PAYLINES = [
     [1,1,1,1,1],
     [0,0,0,0,0],
@@ -1400,7 +1394,7 @@ function createScatterNudgeStep(previousGrid, lockedScatters) {
         lockedScatters.map(cell => cell.col)
     );
 
-    // Only unlocked reels spin again.
+
     for (let col = 0; col < 5; col++) {
         if (lockedColumns.has(col)) continue;
 
@@ -1445,7 +1439,7 @@ function runScatterNudgeFeature(initialGrid) {
     let lockedScatters = findScatterCells(currentGrid);
     const steps = [];
 
-    // A scatter can move at most twice: top -> middle -> bottom.
+
     for (let attempt = 1; attempt <= 2; attempt++) {
         if (!lockedScatters.some(cell => cell.row < 2)) {
             break;
@@ -1487,7 +1481,7 @@ function runScatterNudgeFeature(initialGrid) {
     };
 }
 
-function evaluateSlotGrid(grid, betAmount) {
+function evaluateSlotGrid(grid, betAmount, allowFreeSpinAward = true) {
     let payout = 0;
     const lineWins = [];
     const winningCells = [];
@@ -1518,21 +1512,13 @@ function evaluateSlotGrid(grid, betAmount) {
         const count = Math.min(5, scatterCount);
         const scatterDef = SLOT_SYMBOLS.find(s => s.id === "scatter");
         payout += Math.floor(betAmount * Number(scatterDef.pays[count] || 0));
-        freeSpinsAwarded = SLOT_FREE_SPINS_AWARD[count] || 0;
+        freeSpinsAwarded = allowFreeSpinAward
+            ? (SLOT_FREE_SPINS_AWARD[count] || 0)
+            : 0;
     }
 
-    // Paid and free spins use exactly the same win calculation.
-    // Any displayed win returns at least the stake value, and the route
-    // adds the stake back to produce the same gross payout as a paid spin.
-    let minimumWinApplied = false;
-
-    if (
-        (lineWins.length > 0 || scatterCount >= 3) &&
-        payout < betAmount
-    ) {
-        payout = betAmount;
-        minimumWinApplied = true;
-    }
+   
+    const minimumWinApplied = false;
 
     const bonusMultiplier = 1;
 
@@ -1559,9 +1545,7 @@ function publicSlotsState() {
 
 
 const DEAL_PRIZE_MULTIPLIERS = [
-    // Average value is exactly x0.95 of the player's bet.
-    // This gives the game a realistic long-term house edge while
-    // still leaving several profitable cases.
+
     0,
     0.05,
     0.10,
@@ -1661,11 +1645,7 @@ function calculateDealOffer(game) {
         progress * DEAL_OFFER_PROGRESS_BONUS
     );
 
-    // Round to whole chips after applying the banker factor.
-    // Approximate offer levels are now:
-    // first offer: 87% of remaining-case average
-    // middle offers: 92% to 98%
-    // final offers: up to 105%
+ 
     return Math.max(
         1,
         Math.floor(average * factor)
@@ -1737,8 +1717,7 @@ function getMinesMultiplier(mineCount, safeReveals) {
     const fairMultiplier =
         totalWays / safeWays;
 
-    // Slow down how quickly the multiplier rises after each safe tile.
-    // 0.70 means players receive 70% of the normal multiplier growth.
+
     const reducedMultiplier =
         1 +
         (fairMultiplier - 1) *
@@ -1921,9 +1900,6 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
     const shoe = [];
 
-    // Build a fresh multi-deck shoe for every round. Because bets are locked
-    // before any cards are exposed, cards from earlier rounds cannot be used
-    // to predict the next round.
     for (let deckNumber = 0; deckNumber < deckCount; deckNumber++) {
         for (const suit of suits) {
             for (const rank of ranks) {
@@ -1932,7 +1908,7 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
         }
     }
 
-    // Fisher-Yates shuffle using cryptographically secure randomness.
+  
     for (let i = shoe.length - 1; i > 0; i--) {
         const j = crypto.randomInt(0, i + 1);
         [shoe[i], shoe[j]] = [shoe[j], shoe[i]];
@@ -1942,8 +1918,7 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
 }
 
 function drawCard(excludedCards = []) {
-    // This fallback should only be reached if an unusually large round uses
-    // all 312 cards. It creates another independently shuffled six-deck shoe.
+
     if (!state.blackjack.deck.length) {
         state.blackjack.deck = makeBlackjackShoe();
     }
@@ -1963,16 +1938,14 @@ function drawCard(excludedCards = []) {
         }
     }
 
-    // A dealer hand can never exhaust all 52 unique rank/suit combinations,
-    // but rebuild the shoe safely if no valid card is available.
+
+   
     if (!validIndexes.length) {
         state.blackjack.deck = makeBlackjackShoe();
         return drawCard(excludedCards);
     }
 
-    // Pick uniformly from every currently valid card in the shoe. This keeps
-    // the result cryptographically random while preventing an identical
-    // rank-and-suit card from appearing twice in the supplied hand.
+
     const pickedIndex = validIndexes[
         crypto.randomInt(0, validIndexes.length)
     ];
@@ -2532,8 +2505,7 @@ function scheduleRouletteAutoStart() {
 }
 
 
-// Slower curve so the multiplier visibly climbs and players
-// have a real opportunity to cash out.
+
 const CHICKEN_MAX_STEPS = 12;
 const CHICKEN_HOUSE_FACTOR = 0.97;
 const CHICKEN_MAX_HISTORY = 50;
@@ -2704,7 +2676,7 @@ function pickDailySpinPrize() {
         prize => prize.id === "mk15"
     );
 
-    // Separate 1-in-100,000 MK15 jackpot roll.
+
     if (
         mk15Prize &&
         isDailySpinPrizeAvailable(mk15Prize) &&
@@ -2717,8 +2689,7 @@ function pickDailySpinPrize() {
         prize => prize.id === "grinder"
     );
 
-    // Separate 1-in-10,000 GrinderKnife jackpot roll.
-    // Once won, oneTimeClaims permanently removes it from future spins.
+
     if (
         grinderPrize &&
         isDailySpinPrizeAvailable(grinderPrize) &&
@@ -4590,10 +4561,11 @@ app.post("/slots/spin", (req, res) => {
     const grid = nudgeFeature.finalGrid;
     const evaluation = evaluateSlotGrid(
         grid,
-        betAmount
+        betAmount,
+        !isFreeSpin
     );
 
-    if (evaluation.freeSpinsAwarded > 0) {
+    if (!isFreeSpin && evaluation.freeSpinsAwarded > 0) {
         state.slots.freeSpins[playerId] =
             Math.max(0, Number(state.slots.freeSpins[playerId] || 0)) + evaluation.freeSpinsAwarded;
     }
@@ -4851,7 +4823,6 @@ app.post("/roulette/clear-my-bets", (req, res) => {
     });
 });
 
-// Chicken Crossing routes
 
 app.post("/chicken/start", (req, res) => {
     const chicken = ensureChickenState();
@@ -5644,7 +5615,6 @@ app.post("/mines/cashout", (req, res) => {
     });
 });
 
-// Wheel routes
 app.post("/place-bet", (req, res) => {
     if (state.wheel.spinning) {
         return res.status(409).json({
