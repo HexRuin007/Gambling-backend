@@ -15,6 +15,8 @@ const BLACKJACK_DECK_COUNT = 6;
 const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
+const SLOT_TARGET_RTP = 0.87;
+const SLOT_PAYOUT_FACTOR = 0.845;
 const SLOT_FREE_SPINS_AWARD = { 3: 3, 4: 5, 5: 8 };
 const MINES_BOARD_SIZE = 25;
 const MINES_MIN_COUNT = 1;
@@ -82,20 +84,22 @@ let rouletteAutoTimer = null;
 
 
 const wheel = [
-    { multiplier: 0,    weight: 12 },
-    { multiplier: 0.1,  weight: 12 },
+    // 55% losing outcomes, 5% break-even outcomes and 40% winning outcomes.
+    // Weighted average payout is approximately 89.4%, reduced from 106.2%.
+    { multiplier: 0,    weight: 15 },
+    { multiplier: 0.1,  weight: 14 },
     { multiplier: 0.25, weight: 11 },
-    { multiplier: 0.5,  weight: 10 },
-    { multiplier: 0.75, weight: 10 },
+    { multiplier: 0.5,  weight: 9 },
+    { multiplier: 0.75, weight: 6 },
 
     { multiplier: 1,    weight: 5 },
 
-    { multiplier: 1.25, weight: 15 },
+    { multiplier: 1.25, weight: 17 },
     { multiplier: 1.5,  weight: 10 },
-    { multiplier: 2,    weight: 7 },
-    { multiplier: 3,    weight: 4 },
-    { multiplier: 5,    weight: 3 },
-    { multiplier: 10,   weight: 1 }
+    { multiplier: 2,    weight: 8 },
+    { multiplier: 3,    weight: 3 },
+    { multiplier: 5,    weight: 2 },
+    { multiplier: 10,   weight: 0 }
 ];
 
 const state = {
@@ -4527,9 +4531,23 @@ app.post("/slots/spin", (req, res) => {
 
     // Free spins are not charged, but they gamble the triggering paid-spin
     // stake and receive the exact same gross payout as a paid spin.
-    const creditedPayout =
+    // The original slot maths, including nudges and free spins, returns
+    // roughly 103% before adjustment. Scale all gross wins so the complete
+    // feature settles at approximately the requested 87% long-term RTP.
+    const unadjustedGrossPayout =
         evaluation.payout > 0
             ? evaluation.payout + betAmount
+            : 0;
+
+    const creditedPayout =
+        unadjustedGrossPayout > 0
+            ? Math.max(
+                1,
+                Math.floor(
+                    unadjustedGrossPayout *
+                    SLOT_PAYOUT_FACTOR
+                )
+            )
             : 0;
 
     if (creditedPayout > 0) {
@@ -4554,10 +4572,13 @@ app.post("/slots/spin", (req, res) => {
         scatterNudgeAttempts: nudgeFeature.steps.length,
         betAmount,
         payout: creditedPayout,
-        winAmount: evaluation.payout,
+        winAmount: Math.max(0, creditedPayout - betAmount),
+        unadjustedGrossPayout,
+        rtpTarget: SLOT_TARGET_RTP,
+        payoutFactor: SLOT_PAYOUT_FACTOR,
         stakeReturned:
-            evaluation.payout > 0
-                ? betAmount
+            creditedPayout > 0
+                ? Math.min(betAmount, creditedPayout)
                 : 0,
         profit:
             creditedPayout -
