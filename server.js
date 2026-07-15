@@ -1305,17 +1305,15 @@ function publicChipState() {
 
 
 const SLOT_SYMBOLS = [
-   
-    { id: "pear", label: "🍐", weight: 34, pays: { 3: 1.5, 4: 4, 5: 12 } },
-    { id: "cherry", label: "🍒", weight: 28, pays: { 3: 1.5, 4: 5, 5: 16 } },
-    { id: "bell", label: "🔔", weight: 22, pays: { 3: 2, 4: 7, 5: 24 } },
-    { id: "gem", label: "💎", weight: 16, pays: { 3: 3, 4: 10, 5: 36 } },
-    { id: "crown", label: "👑", weight: 11, pays: { 3: 4, 4: 14, 5: 60 } },
-    { id: "seven", label: "7️⃣", weight: 7, pays: { 3: 6, 4: 24, 5: 120 } },
-    { id: "wild", label: "🃏", weight: 5, pays: { 3: 10, 4: 45, 5: 240 } },
-    { id: "scatter", label: "🐉", weight: 5, pays: { 3: 1.5, 4: 6, 5: 24 } }
+    { id: "pear",    label: "🍐", weight: 30, pays: { 3: 2,  4: 6,  5: 18 } },
+    { id: "cherry",  label: "🍒", weight: 25, pays: { 3: 2,  4: 7,  5: 22 } },
+    { id: "bell",    label: "🔔", weight: 20, pays: { 3: 3,  4: 10, 5: 32 } },
+    { id: "gem",     label: "💎", weight: 15, pays: { 3: 5,  4: 15, 5: 50 } },
+    { id: "crown",   label: "👑", weight: 10, pays: { 3: 8,  4: 24, 5: 90 } },
+    { id: "seven",   label: "7️⃣", weight: 6, pays: { 3: 12, 4: 40, 5: 180 } },
+    { id: "wild",    label: "🃏", weight: 3, pays: { 3: 20, 4: 80, 5: 400 } },
+    { id: "scatter", label: "🐉", weight: 4, pays: { 3: 2,  4: 8,  5: 30 } }
 ];
-
 const SLOT_PAYLINES = [
     [1,1,1,1,1],
     [0,0,0,0,0],
