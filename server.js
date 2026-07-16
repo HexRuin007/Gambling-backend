@@ -1931,13 +1931,40 @@ function publicMineGame(game) {
     };
 }
 
+function isValidActiveMineGame(game, playerId = '') {
+    return Boolean(
+        game &&
+        String(game.playerId || '') === String(playerId || game.playerId || '') &&
+        game.status === 'playing' &&
+        Number.isSafeInteger(Number(game.betAmount)) &&
+        Number(game.betAmount) > 0 &&
+        Number.isInteger(Number(game.mineCount)) &&
+        Number(game.mineCount) >= MINES_MIN_COUNT &&
+        Number(game.mineCount) <= MINES_MAX_COUNT &&
+        Array.isArray(game.minePositions) &&
+        game.minePositions.length === Number(game.mineCount) &&
+        Array.isArray(game.revealed)
+    );
+}
+
 function publicMinesState() {
     const games = {};
+    let removedInvalidGame = false;
 
     for (const [playerId, game] of Object.entries(
         state.mines.games
     )) {
+        if (!isValidActiveMineGame(game, playerId)) {
+            delete state.mines.games[playerId];
+            removedInvalidGame = true;
+            continue;
+        }
+
         games[playerId] = publicMineGame(game);
+    }
+
+    if (removedInvalidGame) {
+        queueChipSave();
     }
 
     return {
@@ -3945,7 +3972,7 @@ app.post("/chips/grant", (req, res) => {
         playerId = request.playerId;
         playerName = request.playerName;
         amount = request.amount;
-        // Requests must be approved using the type selected by the player.
+     
         grantType = request.requestType === "free" ? "free" : "paid";
     }
 
@@ -5729,6 +5756,16 @@ app.post("/mines/start", (req, res) => {
                 `Choose between ${MINES_MIN_COUNT} and ` +
                 `${MINES_MAX_COUNT} mines`
         });
+    }
+
+    const existingMineGame = state.mines.games[playerId];
+
+    if (
+        existingMineGame &&
+        !isValidActiveMineGame(existingMineGame, playerId)
+    ) {
+        delete state.mines.games[playerId];
+        queueChipSave();
     }
 
     if (state.mines.games[playerId]) {
