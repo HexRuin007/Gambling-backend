@@ -3933,7 +3933,7 @@ app.post("/chips/grant", (req, res) => {
         playerId = request.playerId;
         playerName = request.playerName;
         amount = request.amount;
-        // Requests must be approved using the type selected by the player.
+        
         grantType = request.requestType === "free" ? "free" : "paid";
     }
 
@@ -5779,12 +5779,26 @@ app.post("/mines/reveal", (req, res) => {
         Number(req.body?.cell)
     );
 
+    const requestedGameId = String(
+        req.body?.gameId || ""
+    ).trim();
+
     const game = state.mines.games[playerId];
 
     if (!game) {
         return res.status(404).json({
             ok: false,
             error: "No active Mines game"
+        });
+    }
+
+    if (
+        !requestedGameId ||
+        requestedGameId !== game.gameId
+    ) {
+        return res.status(409).json({
+            ok: false,
+            error: "This Mines game is no longer active"
         });
     }
 
@@ -5893,12 +5907,26 @@ app.post("/mines/cashout", (req, res) => {
         req.body?.playerId
     );
 
+    const requestedGameId = String(
+        req.body?.gameId || ""
+    ).trim();
+
     const game = state.mines.games[playerId];
 
     if (!game) {
         return res.status(404).json({
             ok: false,
             error: "No active Mines game"
+        });
+    }
+
+    if (
+        !requestedGameId ||
+        requestedGameId !== game.gameId
+    ) {
+        return res.status(409).json({
+            ok: false,
+            error: "This Mines game is no longer active"
         });
     }
 
