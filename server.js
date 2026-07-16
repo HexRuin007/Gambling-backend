@@ -173,7 +173,7 @@ const state = {
 racing: {
     horses: [
         { id: "Nunu", name: "Nunu Royale" },
-        { id: "Pxpe", name: "Pxpe Express" },
+        { id: "Tom", name: "Pony Tom" },
         { id: "Crack", name: "WhipCrack" },
         { id: "Beans", name: "Jelly Queen" },
         { id: "nipple", name: "Zitze Nipple" },
