@@ -17,6 +17,7 @@ const BLACKJACK_DECK_COUNT = 1;
 const SLOT_MIN_WIN_PROFIT_RATE = 0.01;
 const MAX_CHIP_AMOUNT = 20_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
+const FREE_CHIP_AUTO_APPROVE_BALANCE_LIMIT = 100_000_000;
 const SLOT_MAX_HISTORY = 100;
 const SLOT_TARGET_RTP = 0.90;
 const SLOT_PAYOUT_FACTOR = 0.90;
@@ -3792,6 +3793,12 @@ app.post("/chips/request", (req, res) => {
         req.body?.playerName
     );
     const amount = cleanAmount(req.body?.amount);
+    const requestType =
+        String(req.body?.requestType || "paid")
+            .trim()
+            .toLowerCase() === "free"
+            ? "free"
+            : "paid";
 
     if (!playerId || !playerName || !amount) {
         return res.status(400).json({
@@ -3802,6 +3809,51 @@ app.post("/chips/request", (req, res) => {
 
     rememberPlayer(playerId, playerName);
 
+    const currentBalance = getChipBalance(playerId);
+    const resultingBalance = currentBalance + amount;
+
+    if (
+        requestType === "free" &&
+        resultingBalance < FREE_CHIP_AUTO_APPROVE_BALANCE_LIMIT
+    ) {
+        const granted = creditChips(playerId, amount, {
+            playerName,
+            type: "banker-grant",
+            grantType: "free",
+            note: "Free chip request automatically approved below 100M balance limit"
+        });
+
+        if (!granted) {
+            return res.status(400).json({
+                ok: false,
+                error: "Could not auto-approve free chips"
+            });
+        }
+
+        addDiscordEvent("banker-grant", {
+            playerId,
+            playerName,
+            amount,
+            newBalance: getChipBalance(playerId),
+            source: "auto-approved-free-request",
+            requestId: null,
+            grantType: "free",
+            grantTypeLabel: "Free chips",
+            autoApproved: true
+        });
+
+        queueChipSave();
+
+        return res.json({
+            ok: true,
+            autoApproved: true,
+            requestType,
+            amount,
+            newBalance: getChipBalance(playerId),
+            state: publicState()
+        });
+    }
+
     const existing = state.chips.requests.find(
         request =>
             request.playerId === playerId &&
@@ -3811,6 +3863,7 @@ app.post("/chips/request", (req, res) => {
     if (existing) {
         existing.playerName = playerName;
         existing.amount = amount;
+        existing.requestType = requestType;
         existing.updatedAt = Date.now();
         queueChipSave();
 
@@ -3826,6 +3879,7 @@ app.post("/chips/request", (req, res) => {
         playerId,
         playerName,
         amount,
+        requestType,
         status: "pending",
         createdAt: Date.now()
     };
@@ -3853,7 +3907,7 @@ app.post("/chips/grant", (req, res) => {
     );
     let amount = cleanAmount(req.body?.amount);
 
-    const grantType =
+    let grantType =
         String(req.body?.grantType || "paid")
             .trim()
             .toLowerCase() === "free"
@@ -3879,6 +3933,8 @@ app.post("/chips/grant", (req, res) => {
         playerId = request.playerId;
         playerName = request.playerName;
         amount = request.amount;
+        // Requests must be approved using the type selected by the player.
+        grantType = request.requestType === "free" ? "free" : "paid";
     }
 
     if (!playerId || !amount) {
@@ -4544,15 +4600,18 @@ app.post("/discord/chips/approve", (req, res) => {
         });
     }
 
+    const approvedGrantType =
+        request.requestType === "free" ? "free" : "paid";
+
     const granted = creditChips(
         request.playerId,
         request.amount,
         {
             playerName: request.playerName,
             type: "banker-grant",
-            grantType,
+            grantType: approvedGrantType,
             note:
-                `${grantType === "free" ? "Free" : "Paid"} ` +
+                `${approvedGrantType === "free" ? "Free" : "Paid"} ` +
                 `Discord approval by ${discordDisplayName} ` +
                 `(${discordUserId || "unknown"})`
         }
@@ -4582,9 +4641,9 @@ app.post("/discord/chips/approve", (req, res) => {
         handledBy: discordDisplayName,
         handledByDiscordId:
             discordUserId || null,
-        grantType,
+        grantType: approvedGrantType,
         grantTypeLabel:
-            grantType === "free"
+            approvedGrantType === "free"
                 ? "Free chips"
                 : "Paid chips" 
     });
@@ -4600,7 +4659,7 @@ app.post("/discord/chips/approve", (req, res) => {
         amount: request.amount,
         newBalance:
             getChipBalance(request.playerId),
-        grantType
+        grantType: approvedGrantType
     });
 });
 
