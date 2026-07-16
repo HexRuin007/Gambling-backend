@@ -10,10 +10,12 @@ const CHIP_RESET_OWNER_ID = "229051";
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
+const HORSE_RACING_RTP = 0.90;
+const HORSE_MIN_DECIMAL_ODDS = 1.10;
 const AUTO_START_DELAY_MS = 10_000;
 const BLACKJACK_DECK_COUNT = 1;
 const SLOT_MIN_WIN_PROFIT_RATE = 0.01;
-const MAX_CHIP_AMOUNT = 9_000_000_000_000_000;
+const MAX_CHIP_AMOUNT = 20_000_000_000;
 const NEW_PLAYER_STARTING_CHIPS = 10_000_000;
 const SLOT_MAX_HISTORY = 100;
 const SLOT_TARGET_RTP = 0.90;
@@ -183,7 +185,8 @@ racing: {
     history: [],
     racing: false,
     activeRace: null,
-    autoStartAt: null
+    autoStartAt: null,
+    dailyOdds: null
 }
 };
 
@@ -346,6 +349,18 @@ function loadChipData() {
                 saved.chicken.history.slice(0, 50);
         }
 
+        if (saved.racing && typeof saved.racing === "object") {
+            if (Array.isArray(saved.racing.history)) {
+                state.racing.history = saved.racing.history.slice(0, 30);
+            }
+            if (
+                saved.racing.dailyOdds &&
+                typeof saved.racing.dailyOdds === "object"
+            ) {
+                state.racing.dailyOdds = saved.racing.dailyOdds;
+            }
+        }
+
         if (saved.dailySpin && typeof saved.dailySpin === "object") {
             if (saved.dailySpin.claims && typeof saved.dailySpin.claims === "object") {
                 state.dailySpin.claims = saved.dailySpin.claims;
@@ -419,6 +434,10 @@ function saveChipDataImmediately() {
             },
             chicken: {
                 history: state.chicken.history
+            },
+            racing: {
+                history: state.racing.history,
+                dailyOdds: state.racing.dailyOdds
             },
             dailySpin: {
                 claims: state.dailySpin.claims,
@@ -2298,10 +2317,110 @@ function publicBlackjackState() {
 }
 
 
+function createDailyHorseOdds(dateKey = getUtcDateKey()) {
+    const race = state.racing;
+
+  
+    const ratings = race.horses.map(horse => ({
+        horseId: horse.id,
+        rating: crypto.randomInt(65, 136)
+    }));
+
+    const totalRating = ratings.reduce(
+        (sum, entry) => sum + entry.rating,
+        0
+    );
+
+    const horses = ratings.map(entry => {
+        const horse = race.horses.find(item => item.id === entry.horseId);
+        const winChance = entry.rating / totalRating;
+        const decimalOdds = Math.max(
+            HORSE_MIN_DECIMAL_ODDS,
+            Math.floor((HORSE_RACING_RTP / winChance) * 100) / 100
+        );
+
+        return {
+            horseId: horse.id,
+            horseName: horse.name,
+            rating: entry.rating,
+            winChance,
+            winChancePercent: Math.round(winChance * 10000) / 100,
+            decimalOdds
+        };
+    });
+
+    state.racing.dailyOdds = {
+        dateKey,
+        createdAt: Date.now(),
+        nextChangeAt: Date.parse(`${dateKey}T00:00:00.000Z`) + 86_400_000,
+        rtp: HORSE_RACING_RTP,
+        horses
+    };
+
+    queueChipSave();
+    return state.racing.dailyOdds;
+}
+
+function getDailyHorseOdds() {
+    const today = getUtcDateKey();
+    const dailyOdds = state.racing.dailyOdds;
+
+    const validHorseIds = new Set(state.racing.horses.map(horse => horse.id));
+    const savedHorseIds = new Set(
+        Array.isArray(dailyOdds?.horses)
+            ? dailyOdds.horses.map(horse => horse.horseId)
+            : []
+    );
+
+    const hasCurrentHorseList =
+        validHorseIds.size === savedHorseIds.size &&
+        [...validHorseIds].every(id => savedHorseIds.has(id));
+
+    if (
+        !dailyOdds ||
+        dailyOdds.dateKey !== today ||
+        !hasCurrentHorseList
+    ) {
+        return createDailyHorseOdds(today);
+    }
+
+    return dailyOdds;
+}
+
+function pickWeightedHorseWinner(dailyOdds) {
+    const scale = 1_000_000;
+    const weighted = dailyOdds.horses.map(horse => ({
+        ...horse,
+        weight: Math.max(1, Math.round(horse.winChance * scale))
+    }));
+    const totalWeight = weighted.reduce((sum, horse) => sum + horse.weight, 0);
+    let roll = crypto.randomInt(1, totalWeight + 1);
+
+    for (const horse of weighted) {
+        roll -= horse.weight;
+        if (roll <= 0) return horse;
+    }
+
+    return weighted[weighted.length - 1];
+}
+
 function publicRacingState() {
     const race = state.racing;
+    const dailyOdds = getDailyHorseOdds();
+    const oddsByHorseId = Object.fromEntries(
+        dailyOdds.horses.map(entry => [entry.horseId, entry])
+    );
+
     return {
-        horses: race.horses,
+        horses: race.horses.map(horse => ({
+            ...horse,
+            winChance: oddsByHorseId[horse.id]?.winChance || 0,
+            winChancePercent: oddsByHorseId[horse.id]?.winChancePercent || 0,
+            decimalOdds: oddsByHorseId[horse.id]?.decimalOdds || 0
+        })),
+        dailyOddsDateKey: dailyOdds.dateKey,
+        oddsNextChangeAt: dailyOdds.nextChangeAt,
+        racingRtp: dailyOdds.rtp,
         bets: race.bets,
         history: race.history,
         racing: race.racing,
@@ -3083,27 +3202,32 @@ function startHorseRace() {
 
     const raceId = crypto.randomBytes(8).toString("hex");
 
-    const shuffled = race.horses
-        .map(horse => ({
-            ...horse,
-            speed: crypto.randomInt(70, 101),
-            burst: crypto.randomInt(0, 31)
-        }))
-        .sort(
-            (a, b) =>
-                (b.speed + b.burst) -
-                (a.speed + a.burst)
-        );
-
-    const winner = shuffled[0];
-    const odds = Math.max(
-        2,
-        Math.floor((race.horses.length - 1) * 1.25)
+    const dailyOdds = getDailyHorseOdds();
+    const winnerMarket = pickWeightedHorseWinner(dailyOdds);
+    const winner = race.horses.find(
+        horse => horse.id === winnerMarket.horseId
     );
 
+ 
+    const remainingHorses = race.horses
+        .filter(horse => horse.id !== winner.id)
+        .map(horse => ({
+            ...horse,
+            finishScore: crypto.randomInt(1, 1_000_001)
+        }))
+        .sort((a, b) => b.finishScore - a.finishScore);
+
+    const shuffled = [winner, ...remainingHorses];
+
     const results = race.bets.map(bet => {
+        const horseMarket = dailyOdds.horses.find(
+            horse => horse.horseId === bet.horseId
+        );
         const won = bet.horseId === winner.id;
-        const payout = won ? bet.amount * odds : 0;
+        const decimalOdds = Number(horseMarket?.decimalOdds || 1);
+        const payout = won
+            ? Math.floor(bet.amount * decimalOdds)
+            : 0;
 
         return {
             playerId: bet.playerId,
@@ -3111,6 +3235,8 @@ function startHorseRace() {
             amount: bet.amount,
             horseId: bet.horseId,
             horseName: bet.horseName,
+            decimalOdds,
+            winChancePercent: horseMarket?.winChancePercent || 0,
             won,
             payout,
             profit: payout - bet.amount
@@ -3125,6 +3251,9 @@ function startHorseRace() {
         durationMs: RACE_DURATION_MS,
         winnerHorseId: winner.id,
         winnerHorseName: winner.name,
+        winnerDecimalOdds: winnerMarket.decimalOdds,
+        winnerWinChancePercent: winnerMarket.winChancePercent,
+        oddsDateKey: dailyOdds.dateKey,
         placements: shuffled.map((horse, index) => ({
             place: index + 1,
             id: horse.id,
@@ -3624,6 +3753,7 @@ app.post("/chips/reset-all", (req, res) => {
     state.racing.racing = false;
     state.racing.activeRace = null;
     state.racing.autoStartAt = null;
+    state.racing.dailyOdds = null;
 
     const resetAt = Date.now();
 
