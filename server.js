@@ -117,7 +117,8 @@ const state = {
         dailyHouseStats: {},
         leaderboardStats: {},
         fundingBalances: {},
-        lastBetFunding: {}
+        lastBetFunding: {},
+        blacklist: {}
     },
     slots: {
         history: [],
@@ -263,6 +264,10 @@ function loadChipData() {
             );
 
             queueChipSave();
+        }
+
+        if (saved.blacklist && typeof saved.blacklist === "object") {
+            state.chips.blacklist = saved.blacklist;
         }
 
         if (
@@ -416,6 +421,7 @@ function saveChipDataImmediately() {
             dailyHouseStats: state.chips.dailyHouseStats,
             leaderboardStats: state.chips.leaderboardStats,
             fundingBalances: state.chips.fundingBalances,
+            blacklist: state.chips.blacklist,
             slots: {
                 history: state.slots.history,
                 freeSpins: state.slots.freeSpins,
@@ -1442,7 +1448,11 @@ function publicChipState() {
 
         transactions: state.chips.transactions
             .slice(0, 50)
-            .map(transaction => ({ ...transaction }))
+            .map(transaction => ({ ...transaction })),
+
+        blacklist: Object.values(state.chips.blacklist || {})
+            .map(entry => ({ ...entry }))
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
     }
 };
 
@@ -3418,6 +3428,128 @@ app.post("/admin-login", (req, res) => {
     res.json({ ok: true, token });
 });
 
+
+
+
+function getBlacklistEntry(playerId) {
+    const id = cleanPlayerId(playerId);
+    return id ? state.chips.blacklist?.[id] || null : null;
+}
+
+function rejectBlacklistedPlayer(req, res, next) {
+    const exemptPaths = new Set([
+        "/",
+        "/health",
+        "/state",
+        "/admin-login",
+        "/chips/blacklist",
+        "/chips/blacklist/remove"
+    ]);
+
+    if (exemptPaths.has(req.path)) {
+        return next();
+    }
+
+    const playerId = cleanPlayerId(
+        req.body?.playerId ??
+        req.query?.playerId ??
+        req.body?.userId ??
+        req.query?.userId
+    );
+
+    if (!playerId) {
+        return next();
+    }
+
+    const entry = getBlacklistEntry(playerId);
+
+    if (!entry) {
+        return next();
+    }
+
+    return res.status(403).json({
+        ok: false,
+        blacklisted: true,
+        error: entry.reason
+            ? `You are blacklisted from this casino: ${entry.reason}`
+            : "You are blacklisted from this casino",
+        blacklistEntry: {
+            playerId: entry.playerId,
+            playerName: entry.playerName,
+            reason: entry.reason,
+            createdAt: entry.createdAt
+        }
+    });
+}
+
+app.use(rejectBlacklistedPlayer);
+
+app.post("/chips/blacklist", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(
+        req.body?.playerName ||
+        state.chips.playerNames[playerId] ||
+        "Player"
+    );
+    const reason = String(req.body?.reason || "")
+        .trim()
+        .slice(0, 240);
+
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Enter a player ID"
+        });
+    }
+
+    state.chips.blacklist[playerId] = {
+        playerId,
+        playerName,
+        reason,
+        createdAt: Date.now()
+    };
+
+    state.chips.requests = state.chips.requests.filter(
+        request => String(request.playerId) !== playerId
+    );
+    state.chips.withdrawalRequests = state.chips.withdrawalRequests.filter(
+        request => String(request.playerId) !== playerId
+    );
+
+    queueChipSave();
+
+    return res.json({
+        ok: true,
+        entry: state.chips.blacklist[playerId],
+        state: publicState()
+    });
+});
+
+app.post("/chips/blacklist/remove", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Enter a player ID"
+        });
+    }
+
+    const existed = Boolean(state.chips.blacklist[playerId]);
+    delete state.chips.blacklist[playerId];
+    queueChipSave();
+
+    return res.json({
+        ok: true,
+        removed: existed,
+        playerId,
+        state: publicState()
+    });
+});
 
 
 app.post("/chips/register-player", (req, res) => {
