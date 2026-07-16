@@ -1891,8 +1891,21 @@ function createMinePositions(mineCount) {
     return cells.slice(0, mineCount);
 }
 
+function ensureMineGameId(game) {
+    if (!game) return "";
+
+    if (!game.gameId) {
+        game.gameId = crypto.randomBytes(8).toString("hex");
+        queueChipSave();
+    }
+
+    return game.gameId;
+}
+
 function publicMineGame(game) {
     if (!game) return null;
+
+    ensureMineGameId(game);
 
     return {
         gameId: game.gameId,
@@ -1902,7 +1915,6 @@ function publicMineGame(game) {
         mineCount: game.mineCount,
         revealed: [...game.revealed],
         safeReveals: game.safeReveals,
-        revealed: [...game.revealed],
         multiplier: getMinesMultiplier(
             game.mineCount,
             game.safeReveals
@@ -3933,7 +3945,7 @@ app.post("/chips/grant", (req, res) => {
         playerId = request.playerId;
         playerName = request.playerName;
         amount = request.amount;
-        
+        // Requests must be approved using the type selected by the player.
         grantType = request.requestType === "free" ? "free" : "paid";
     }
 
@@ -5792,6 +5804,8 @@ app.post("/mines/reveal", (req, res) => {
         });
     }
 
+    ensureMineGameId(game);
+
     if (
         !requestedGameId ||
         requestedGameId !== game.gameId
@@ -5919,6 +5933,8 @@ app.post("/mines/cashout", (req, res) => {
             error: "No active Mines game"
         });
     }
+
+    ensureMineGameId(game);
 
     if (
         !requestedGameId ||
