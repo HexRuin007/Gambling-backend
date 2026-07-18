@@ -2807,20 +2807,20 @@ function scheduleRouletteAutoStart() {
 
 
 const CHICKEN_MAX_STEPS = 12;
-const CHICKEN_HOUSE_FACTOR = 0.97;
+const CHICKEN_HOUSE_FACTOR = 0.56;
 const CHICKEN_MAX_HISTORY = 50;
 const CHICKEN_RISKS = {
     easy: {
         label: "Easy",
-        survivalChance: 0.88
+        survivalChance: 0.56
     },
     medium: {
         label: "Medium",
-        survivalChance: 0.78
+        survivalChance: 0.36
     },
     hard: {
         label: "Hard",
-        survivalChance: 0.68
+        survivalChance: 0.16
     }
 };
 
