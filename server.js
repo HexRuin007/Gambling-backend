@@ -3,6 +3,7 @@ import cors from "cors";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import compression from "compression";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
@@ -76,6 +77,7 @@ const app = express();
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin", "X-Discord-Bot-Secret"] }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(compression());
 
 const adminTokens = new Set();
 
@@ -1688,7 +1690,19 @@ function evaluateSlotGrid(grid, betAmount, allowFreeSpinAward = true) {
 
 function publicSlotsState() {
     return {
-        history: state.slots.history.slice(0, 50),
+        history: state.slots.history.slice(0, 15).map(entry => ({
+            spinId: entry.spinId,
+            playerId: entry.playerId,
+            playerName: entry.playerName,
+            betAmount: entry.betAmount,
+            payout: entry.payout,
+            profit: entry.profit,
+            freeSpin: entry.freeSpin,
+            freeSpinsAwarded: entry.freeSpinsAwarded,
+            bonusMultiplier: entry.bonusMultiplier,
+            scatterCount: entry.scatterCount,
+            createdAt: entry.createdAt
+        })),
         freeSpins: { ...state.slots.freeSpins },
         paytable: SLOT_SYMBOLS.map(symbol => ({ symbol: symbol.id, label: symbol.label, pays: symbol.pays })),
         paylines: SLOT_PAYLINES.length
@@ -1770,7 +1784,7 @@ function publicDealState() {
         caseCount: DEAL_CASE_COUNT,
         games,
         history: state.deal.history
-            .slice(0, 50)
+            .slice(0, 10)
             .map(entry => ({ ...entry }))
     };
 }
@@ -1983,7 +1997,7 @@ function publicMinesState() {
         maximumMines: MINES_MAX_COUNT,
         games,
         history: state.mines.history
-            .slice(0, 50)
+            .slice(0, 10)
             .map(entry => ({ ...entry }))
     };
 }
@@ -2334,7 +2348,7 @@ function finishBlackjackRound() {
             profit: p.profit
         }))
     });
-    bj.history = bj.history.slice(0, 20);
+    bj.history = bj.history.slice(0, 10);
 }
 
 function publicBlackjackState() {
@@ -2506,7 +2520,7 @@ function finishHorseRace(raceId) {
         placements: active.placements,
         createdAt: Date.now()
     });
-    race.history = race.history.slice(0, 30);
+    race.history = race.history.slice(0, 10);
     race.bets = [];
     race.racing = false;
     race.activeRace = null;
@@ -2639,7 +2653,7 @@ function publicRouletteState() {
             bet => ({ ...bet })
         ),
         history: roulette.history
-            .slice(0, 30)
+            .slice(0, 10)
             .map(entry => ({ ...entry })),
         spinning: roulette.spinning,
         activeSpin: roulette.activeSpin,
@@ -2690,7 +2704,7 @@ function finishRouletteSpin(spinId) {
     });
 
     roulette.history =
-        roulette.history.slice(0, 30);
+        roulette.history.slice(0, 10);
 
     roulette.bets = [];
     roulette.spinning = false;
@@ -2914,7 +2928,7 @@ function publicChickenState() {
     return {
         games,
         history: chicken.history
-            .slice(0, 30)
+            .slice(0, 10)
             .map(entry => ({ ...entry })),
         maxSteps: CHICKEN_MAX_STEPS,
         risks: Object.fromEntries(
