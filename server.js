@@ -1,9 +1,10 @@
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import compression from "compression";
+
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
@@ -74,10 +75,10 @@ const DATA_DIRECTORY = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
 const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
 const app = express();
+app.use(compression());
 app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin", "X-Discord-Bot-Secret"] }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(compression());
 
 const adminTokens = new Set();
 
@@ -1427,45 +1428,36 @@ function buildPlayerGamblingAudit(playerId, limit = 20) {
         .slice(0, safeLimit);
 }
 
-function publicChipState(scope = {}) {
-    const { playerId = "", isAdmin = false } = scope;
-    const id = cleanPlayerId(playerId);
-
-    const balances = {};
-    const playerNames = {};
-
-    if (id && Object.prototype.hasOwnProperty.call(state.chips.balances, id)) {
-        balances[id] = state.chips.balances[id];
-    }
-
-    if (id && state.chips.playerNames[id]) {
-        playerNames[id] = state.chips.playerNames[id];
-    }
-
+function publicChipState() {
     return {
-        balances,
-        playerNames,
+        balances: {
+            ...state.chips.balances
+        },
 
-        requests: isAdmin
-            ? state.chips.requests.map(request => ({ ...request }))
-            : state.chips.requests
-                .filter(request => cleanPlayerId(request.playerId) === id)
+        playerNames: {
+            ...state.chips.playerNames
+        },
+
+        requests: state.chips.requests.map(
+            request => ({ ...request })
+        ),
+
+        withdrawalRequests:
+            state.chips.withdrawalRequests
+                .filter(request =>
+                    request.status === "pending"
+                )
                 .map(request => ({ ...request })),
 
-        withdrawalRequests: state.chips.withdrawalRequests
-            .filter(request =>
-                request.status === "pending" &&
-                (isAdmin || cleanPlayerId(request.playerId) === id)
-            )
-            .map(request => ({ ...request })),
+        transactions: state.chips.transactions
+            .slice(0, 50)
+            .map(transaction => ({ ...transaction })),
 
-        blacklist: isAdmin
-            ? Object.values(state.chips.blacklist || {})
-                .map(entry => ({ ...entry }))
-                .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-            : (id && state.chips.blacklist[id] ? [{ ...state.chips.blacklist[id] }] : [])
-    };
-}
+        blacklist: Object.values(state.chips.blacklist || {})
+            .map(entry => ({ ...entry }))
+            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    }
+};
 
 
 
@@ -1697,31 +1689,10 @@ function evaluateSlotGrid(grid, betAmount, allowFreeSpinAward = true) {
     };
 }
 
-function publicSlotsState(scope = {}) {
-    const { playerId = "", isAdmin = false } = scope;
-    const id = cleanPlayerId(playerId);
-
-    const history = isAdmin
-        ? state.slots.history.slice(0, 30)
-        : state.slots.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
-
+function publicSlotsState() {
     return {
-        history: history.map(entry => ({
-            spinId: entry.spinId,
-            playerId: entry.playerId,
-            playerName: entry.playerName,
-            betAmount: entry.betAmount,
-            payout: entry.payout,
-            profit: entry.profit,
-            freeSpin: entry.freeSpin,
-            freeSpinsAwarded: entry.freeSpinsAwarded,
-            bonusMultiplier: entry.bonusMultiplier,
-            scatterCount: entry.scatterCount,
-            createdAt: entry.createdAt
-        })),
-        freeSpins: isAdmin
-            ? { ...state.slots.freeSpins }
-            : (id ? { [id]: state.slots.freeSpins[id] || 0 } : {}),
+        history: state.slots.history.slice(0, 50),
+        freeSpins: { ...state.slots.freeSpins },
         paytable: SLOT_SYMBOLS.map(symbol => ({ symbol: symbol.id, label: symbol.label, pays: symbol.pays })),
         paylines: SLOT_PAYLINES.length
     };
@@ -1789,26 +1760,21 @@ function publicDealGame(game) {
     };
 }
 
-function publicDealState(scope = {}) {
-    const { playerId = "", isAdmin = false } = scope;
-    const id = cleanPlayerId(playerId);
-
+function publicDealState() {
     const games = {};
 
-    for (const [pid, game] of Object.entries(state.deal.games)) {
-        if (isAdmin || pid === id) {
-            games[pid] = publicDealGame(game);
-        }
+    for (const [playerId, game] of Object.entries(
+        state.deal.games
+    )) {
+        games[playerId] = publicDealGame(game);
     }
-
-    const history = isAdmin
-        ? state.deal.history.slice(0, 30)
-        : state.deal.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
 
     return {
         caseCount: DEAL_CASE_COUNT,
         games,
-        history: history.map(entry => ({ ...entry }))
+        history: state.deal.history
+            .slice(0, 50)
+            .map(entry => ({ ...entry }))
     };
 }
 
@@ -1994,39 +1960,34 @@ function isValidActiveMineGame(game, playerId = '') {
     );
 }
 
-function publicMinesState(scope = {}) {
-    const { playerId = "", isAdmin = false } = scope;
-    const id = cleanPlayerId(playerId);
-
+function publicMinesState() {
     const games = {};
     let removedInvalidGame = false;
 
-    for (const [pid, game] of Object.entries(state.mines.games)) {
-        if (!isValidActiveMineGame(game, pid)) {
-            delete state.mines.games[pid];
+    for (const [playerId, game] of Object.entries(
+        state.mines.games
+    )) {
+        if (!isValidActiveMineGame(game, playerId)) {
+            delete state.mines.games[playerId];
             removedInvalidGame = true;
             continue;
         }
 
-        if (isAdmin || pid === id) {
-            games[pid] = publicMineGame(game);
-        }
+        games[playerId] = publicMineGame(game);
     }
 
     if (removedInvalidGame) {
         queueChipSave();
     }
 
-    const history = isAdmin
-        ? state.mines.history.slice(0, 30)
-        : state.mines.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
-
     return {
         boardSize: MINES_BOARD_SIZE,
         minimumMines: MINES_MIN_COUNT,
         maximumMines: MINES_MAX_COUNT,
         games,
-        history: history.map(entry => ({ ...entry }))
+        history: state.mines.history
+            .slice(0, 50)
+            .map(entry => ({ ...entry }))
     };
 }
 
@@ -2089,17 +2050,6 @@ function isAdminToken(token) {
 function getToken(req) {
     return String(req.headers.authorization || req.body?.token || "").replace(/^Bearer\s+/i, "").trim();
 }
-function stateForRequest(req) {
-    const playerId = cleanPlayerId(
-        req.body?.playerId ||
-        req.body?.requesterId ||
-        req.query?.playerId
-    );
-
-    const isAdmin = isAdminToken(getToken(req));
-
-    return publicState({ playerId, isAdmin });
-}
 
 function requireAdmin(req, res) {
     const token = getToken(req);
@@ -2132,7 +2082,7 @@ function requireDiscordBot(req, res) {
 function publicWheelState() {
     return {
         bets: state.wheel.bets,
-        history: state.wheel.history.slice(0, 10),
+        history: state.wheel.history,
         spinning: state.wheel.spinning,
         activeSpin: state.wheel.activeSpin,
         autoStartAt: state.wheel.autoStartAt,
@@ -2387,7 +2337,7 @@ function finishBlackjackRound() {
             profit: p.profit
         }))
     });
-    bj.history = bj.history.slice(0, 10);
+    bj.history = bj.history.slice(0, 20);
 }
 
 function publicBlackjackState() {
@@ -2412,7 +2362,7 @@ function publicBlackjackState() {
         status: bj.status,
         currentTurnId: active ? active.playerId : "",
         currentTurnName: active ? active.playerName : "",
-        history: bj.history.slice(0, 10),
+        history: bj.history,
         autoStartAt: bj.autoStartAt,
         turnExpiresAt: bj.turnExpiresAt || null,
         turnTimeoutMs: BLACKJACK_TURN_TIMEOUT_MS
@@ -2525,7 +2475,7 @@ function publicRacingState() {
         oddsNextChangeAt: dailyOdds.nextChangeAt,
         racingRtp: dailyOdds.rtp,
         bets: race.bets,
-       history: race.history.slice(0, 10),
+        history: race.history,
         racing: race.racing,
         activeRace: race.activeRace,
         autoStartAt: race.autoStartAt
@@ -2559,7 +2509,7 @@ function finishHorseRace(raceId) {
         placements: active.placements,
         createdAt: Date.now()
     });
-    race.history = race.history.slice(0, 10);
+    race.history = race.history.slice(0, 30);
     race.bets = [];
     race.racing = false;
     race.activeRace = null;
@@ -2691,9 +2641,9 @@ function publicRouletteState() {
         bets: roulette.bets.map(
             bet => ({ ...bet })
         ),
-    history: roulette.history
-    .slice(0, 15)
-    .map(entry => ({ ...entry })),
+        history: roulette.history
+            .slice(0, 30)
+            .map(entry => ({ ...entry })),
         spinning: roulette.spinning,
         activeSpin: roulette.activeSpin,
         autoStartAt: roulette.autoStartAt
@@ -2743,7 +2693,7 @@ function finishRouletteSpin(spinId) {
     });
 
     roulette.history =
-        roulette.history.slice(0, 15);
+        roulette.history.slice(0, 30);
 
     roulette.bets = [];
     roulette.spinning = false;
@@ -2953,32 +2903,34 @@ function publicChickenGame(game) {
     };
 }
 
-function publicChickenState(scope = {}) {
-    const { playerId = "", isAdmin = false } = scope;
-    const id = cleanPlayerId(playerId);
+function publicChickenState() {
     const chicken = ensureChickenState();
-
     const games = {};
 
-    for (const [pid, game] of Object.entries(chicken.games)) {
-        if (isAdmin || pid === id) {
-            games[pid] = publicChickenGame(game);
-        }
+    for (const [playerId, game] of Object.entries(
+        chicken.games
+    )) {
+        games[playerId] =
+            publicChickenGame(game);
     }
-
-    const history = isAdmin
-        ? chicken.history.slice(0, 30)
-        : chicken.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
 
     return {
         games,
-        history: history.map(entry => ({ ...entry })),
+        history: chicken.history
+            .slice(0, 30)
+            .map(entry => ({ ...entry })),
         maxSteps: CHICKEN_MAX_STEPS,
         risks: Object.fromEntries(
-            Object.entries(CHICKEN_RISKS).map(([key, risk]) => [
-                key,
-                { label: risk.label, survivalChance: risk.survivalChance }
-            ])
+            Object.entries(CHICKEN_RISKS).map(
+                ([key, risk]) => [
+                    key,
+                    {
+                        label: risk.label,
+                        survivalChance:
+                            risk.survivalChance
+                    }
+                ]
+            )
         )
     };
 }
@@ -3125,14 +3077,14 @@ function publicDailySpinState() {
     };
 }
 
-function publicState(scope = {}) {
+function publicState() {
     return {
-        chips: publicChipState(scope),
-        slots: publicSlotsState(scope),
-        mines: publicMinesState(scope),
-        deal: publicDealState(scope),
+        chips: publicChipState(),
+        slots: publicSlotsState(),
+        mines: publicMinesState(),
+        deal: publicDealState(),
         roulette: publicRouletteState(),
-        chicken: publicChickenState(scope),
+        chicken: publicChickenState(),
         dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
@@ -3465,7 +3417,7 @@ app.get("/state", (req, res) => {
     res.json({
         ok: true,
         serverTime: Date.now(),
-        state: stateForRequest(req)
+        state: publicState()
     });
 });
 
