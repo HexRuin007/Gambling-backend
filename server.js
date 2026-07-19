@@ -764,6 +764,11 @@ function getChipBalance(playerId) {
     );
 }
 
+function displayBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    return id === CHIP_RESET_OWNER_ID ? "∞" : getChipBalance(id);
+}
+
 function addChipTransaction({
     playerId,
     playerName,
@@ -1021,7 +1026,7 @@ function debitChips(playerId, amount, options = {}) {
         state.chips.balances[id] = balance - value;
     }
 
-    state.chips.balances[id] = balance - value;
+   
 
     let debitedFunding;
     if ((options.type === "bet" || options.type === "bet-adjustment") && options.gameType) {
@@ -4221,10 +4226,7 @@ app.post("/chips/withdraw-request", (req, res) => {
                 `You only have ${currentBalance} chips`
         });
     }
-    function displayBalance(playerId) {
-    const id = cleanPlayerId(playerId);
-    return id === CHIP_RESET_OWNER_ID ? "∞" : getChipBalance(id);
-}
+ 
 
     const existing =
         state.chips.withdrawalRequests.find(
