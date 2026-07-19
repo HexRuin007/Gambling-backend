@@ -1449,7 +1449,7 @@ function publicChipState() {
                 .map(request => ({ ...request })),
 
         transactions: state.chips.transactions
-            .slice(0, 50)
+            .slice(0, 10)
             .map(transaction => ({ ...transaction })),
 
         blacklist: Object.values(state.chips.blacklist || {})
@@ -2093,7 +2093,7 @@ function requireDiscordBot(req, res) {
 function publicWheelState() {
     return {
         bets: state.wheel.bets,
-        history: state.wheel.history,
+        history: state.wheel.history.slice(0, 10),
         spinning: state.wheel.spinning,
         activeSpin: state.wheel.activeSpin,
         autoStartAt: state.wheel.autoStartAt,
