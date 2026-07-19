@@ -1427,36 +1427,45 @@ function buildPlayerGamblingAudit(playerId, limit = 20) {
         .slice(0, safeLimit);
 }
 
-function publicChipState() {
+function publicChipState(scope = {}) {
+    const { playerId = "", isAdmin = false } = scope;
+    const id = cleanPlayerId(playerId);
+
+    const balances = {};
+    const playerNames = {};
+
+    if (id && Object.prototype.hasOwnProperty.call(state.chips.balances, id)) {
+        balances[id] = state.chips.balances[id];
+    }
+
+    if (id && state.chips.playerNames[id]) {
+        playerNames[id] = state.chips.playerNames[id];
+    }
+
     return {
-        balances: {
-            ...state.chips.balances
-        },
+        balances,
+        playerNames,
 
-        playerNames: {
-            ...state.chips.playerNames
-        },
-
-        requests: state.chips.requests.map(
-            request => ({ ...request })
-        ),
-
-        withdrawalRequests:
-            state.chips.withdrawalRequests
-                .filter(request =>
-                    request.status === "pending"
-                )
+        requests: isAdmin
+            ? state.chips.requests.map(request => ({ ...request }))
+            : state.chips.requests
+                .filter(request => cleanPlayerId(request.playerId) === id)
                 .map(request => ({ ...request })),
 
-        transactions: state.chips.transactions
-            .slice(0, 10)
-            .map(transaction => ({ ...transaction })),
+        withdrawalRequests: state.chips.withdrawalRequests
+            .filter(request =>
+                request.status === "pending" &&
+                (isAdmin || cleanPlayerId(request.playerId) === id)
+            )
+            .map(request => ({ ...request })),
 
-        blacklist: Object.values(state.chips.blacklist || {})
-            .map(entry => ({ ...entry }))
-            .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-    }
-};
+        blacklist: isAdmin
+            ? Object.values(state.chips.blacklist || {})
+                .map(entry => ({ ...entry }))
+                .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+            : (id && state.chips.blacklist[id] ? [{ ...state.chips.blacklist[id] }] : [])
+    };
+}
 
 
 
@@ -1688,9 +1697,16 @@ function evaluateSlotGrid(grid, betAmount, allowFreeSpinAward = true) {
     };
 }
 
-function publicSlotsState() {
+function publicSlotsState(scope = {}) {
+    const { playerId = "", isAdmin = false } = scope;
+    const id = cleanPlayerId(playerId);
+
+    const history = isAdmin
+        ? state.slots.history.slice(0, 30)
+        : state.slots.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
+
     return {
-        history: state.slots.history.slice(0, 15).map(entry => ({
+        history: history.map(entry => ({
             spinId: entry.spinId,
             playerId: entry.playerId,
             playerName: entry.playerName,
@@ -1703,7 +1719,9 @@ function publicSlotsState() {
             scatterCount: entry.scatterCount,
             createdAt: entry.createdAt
         })),
-        freeSpins: { ...state.slots.freeSpins },
+        freeSpins: isAdmin
+            ? { ...state.slots.freeSpins }
+            : (id ? { [id]: state.slots.freeSpins[id] || 0 } : {}),
         paytable: SLOT_SYMBOLS.map(symbol => ({ symbol: symbol.id, label: symbol.label, pays: symbol.pays })),
         paylines: SLOT_PAYLINES.length
     };
@@ -1771,21 +1789,26 @@ function publicDealGame(game) {
     };
 }
 
-function publicDealState() {
+function publicDealState(scope = {}) {
+    const { playerId = "", isAdmin = false } = scope;
+    const id = cleanPlayerId(playerId);
+
     const games = {};
 
-    for (const [playerId, game] of Object.entries(
-        state.deal.games
-    )) {
-        games[playerId] = publicDealGame(game);
+    for (const [pid, game] of Object.entries(state.deal.games)) {
+        if (isAdmin || pid === id) {
+            games[pid] = publicDealGame(game);
+        }
     }
+
+    const history = isAdmin
+        ? state.deal.history.slice(0, 30)
+        : state.deal.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
 
     return {
         caseCount: DEAL_CASE_COUNT,
         games,
-        history: state.deal.history
-            .slice(0, 10)
-            .map(entry => ({ ...entry }))
+        history: history.map(entry => ({ ...entry }))
     };
 }
 
@@ -1971,34 +1994,39 @@ function isValidActiveMineGame(game, playerId = '') {
     );
 }
 
-function publicMinesState() {
+function publicMinesState(scope = {}) {
+    const { playerId = "", isAdmin = false } = scope;
+    const id = cleanPlayerId(playerId);
+
     const games = {};
     let removedInvalidGame = false;
 
-    for (const [playerId, game] of Object.entries(
-        state.mines.games
-    )) {
-        if (!isValidActiveMineGame(game, playerId)) {
-            delete state.mines.games[playerId];
+    for (const [pid, game] of Object.entries(state.mines.games)) {
+        if (!isValidActiveMineGame(game, pid)) {
+            delete state.mines.games[pid];
             removedInvalidGame = true;
             continue;
         }
 
-        games[playerId] = publicMineGame(game);
+        if (isAdmin || pid === id) {
+            games[pid] = publicMineGame(game);
+        }
     }
 
     if (removedInvalidGame) {
         queueChipSave();
     }
 
+    const history = isAdmin
+        ? state.mines.history.slice(0, 30)
+        : state.mines.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
+
     return {
         boardSize: MINES_BOARD_SIZE,
         minimumMines: MINES_MIN_COUNT,
         maximumMines: MINES_MAX_COUNT,
         games,
-        history: state.mines.history
-            .slice(0, 10)
-            .map(entry => ({ ...entry }))
+        history: history.map(entry => ({ ...entry }))
     };
 }
 
@@ -2060,6 +2088,17 @@ function isAdminToken(token) {
 
 function getToken(req) {
     return String(req.headers.authorization || req.body?.token || "").replace(/^Bearer\s+/i, "").trim();
+}
+function stateForRequest(req) {
+    const playerId = cleanPlayerId(
+        req.body?.playerId ||
+        req.body?.requesterId ||
+        req.query?.playerId
+    );
+
+    const isAdmin = isAdminToken(getToken(req));
+
+    return publicState({ playerId, isAdmin });
 }
 
 function requireAdmin(req, res) {
@@ -2373,7 +2412,7 @@ function publicBlackjackState() {
         status: bj.status,
         currentTurnId: active ? active.playerId : "",
         currentTurnName: active ? active.playerName : "",
-        history: bj.history,
+        history: bj.history.slice(0, 10),
         autoStartAt: bj.autoStartAt,
         turnExpiresAt: bj.turnExpiresAt || null,
         turnTimeoutMs: BLACKJACK_TURN_TIMEOUT_MS
@@ -2486,7 +2525,7 @@ function publicRacingState() {
         oddsNextChangeAt: dailyOdds.nextChangeAt,
         racingRtp: dailyOdds.rtp,
         bets: race.bets,
-        history: race.history,
+       history: race.history.slice(0, 10),
         racing: race.racing,
         activeRace: race.activeRace,
         autoStartAt: race.autoStartAt
@@ -2652,9 +2691,9 @@ function publicRouletteState() {
         bets: roulette.bets.map(
             bet => ({ ...bet })
         ),
-        history: roulette.history
-            .slice(0, 10)
-            .map(entry => ({ ...entry })),
+    history: roulette.history
+    .slice(0, 15)
+    .map(entry => ({ ...entry })),
         spinning: roulette.spinning,
         activeSpin: roulette.activeSpin,
         autoStartAt: roulette.autoStartAt
@@ -2704,7 +2743,7 @@ function finishRouletteSpin(spinId) {
     });
 
     roulette.history =
-        roulette.history.slice(0, 10);
+        roulette.history.slice(0, 15);
 
     roulette.bets = [];
     roulette.spinning = false;
@@ -2914,34 +2953,32 @@ function publicChickenGame(game) {
     };
 }
 
-function publicChickenState() {
+function publicChickenState(scope = {}) {
+    const { playerId = "", isAdmin = false } = scope;
+    const id = cleanPlayerId(playerId);
     const chicken = ensureChickenState();
+
     const games = {};
 
-    for (const [playerId, game] of Object.entries(
-        chicken.games
-    )) {
-        games[playerId] =
-            publicChickenGame(game);
+    for (const [pid, game] of Object.entries(chicken.games)) {
+        if (isAdmin || pid === id) {
+            games[pid] = publicChickenGame(game);
+        }
     }
+
+    const history = isAdmin
+        ? chicken.history.slice(0, 30)
+        : chicken.history.filter(entry => cleanPlayerId(entry.playerId) === id).slice(0, 15);
 
     return {
         games,
-        history: chicken.history
-            .slice(0, 10)
-            .map(entry => ({ ...entry })),
+        history: history.map(entry => ({ ...entry })),
         maxSteps: CHICKEN_MAX_STEPS,
         risks: Object.fromEntries(
-            Object.entries(CHICKEN_RISKS).map(
-                ([key, risk]) => [
-                    key,
-                    {
-                        label: risk.label,
-                        survivalChance:
-                            risk.survivalChance
-                    }
-                ]
-            )
+            Object.entries(CHICKEN_RISKS).map(([key, risk]) => [
+                key,
+                { label: risk.label, survivalChance: risk.survivalChance }
+            ])
         )
     };
 }
@@ -3088,14 +3125,14 @@ function publicDailySpinState() {
     };
 }
 
-function publicState() {
+function publicState(scope = {}) {
     return {
-        chips: publicChipState(),
-        slots: publicSlotsState(),
-        mines: publicMinesState(),
-        deal: publicDealState(),
+        chips: publicChipState(scope),
+        slots: publicSlotsState(scope),
+        mines: publicMinesState(scope),
+        deal: publicDealState(scope),
         roulette: publicRouletteState(),
-        chicken: publicChickenState(),
+        chicken: publicChickenState(scope),
         dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
