@@ -100,12 +100,12 @@ const wheel = [
 
     { multiplier: 1,    weight: 5 },
 
-    { multiplier: 1.25, weight: 16 },
+    { multiplier: 1.25, weight: 16.5 },
     { multiplier: 1.5,  weight: 10 },
     { multiplier: 2,    weight: 8 },
     { multiplier: 3,    weight: 3 },
     { multiplier: 5,    weight: 2 },
-    { multiplier: 10,   weight: 1 }
+    { multiplier: 10,   weight: 0.5}
 ];
 
 const state = {
