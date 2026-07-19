@@ -8,7 +8,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_ID = "229051", "207252";
+const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -766,7 +766,7 @@ function getChipBalance(playerId) {
 
 function displayBalance(playerId) {
     const id = cleanPlayerId(playerId);
-    return id === CHIP_RESET_OWNER_ID ? "∞" : getChipBalance(id);
+   return CHIP_RESET_OWNER_IDS.has(id) ? "∞" : getChipBalance(id);
 }
 
 function addChipTransaction({
@@ -1012,7 +1012,7 @@ function debitChips(playerId, amount, options = {}) {
 
     rememberPlayer(id, options.playerName);
 
-    const isUnlimitedPlayer = id === CHIP_RESET_OWNER_ID;
+    const isUnlimitedPlayer = CHIP_RESET_OWNER_IDS.has(id);
     const balance = getChipBalance(id);
 
     if (!isUnlimitedPlayer && balance < value) {
@@ -1442,7 +1442,7 @@ function publicChipState() {
     return {
         balances: Object.fromEntries(
             Object.entries(state.chips.balances).map(([id, amount]) =>
-                id === CHIP_RESET_OWNER_ID ? [id, "∞"] : [id, amount]
+                CHIP_RESET_OWNER_IDS.has(id) ? [id, "∞"] : [id, amount]
             )
         ),
         playerNames: {
@@ -3855,8 +3855,7 @@ app.post("/chips/reset-all", (req, res) => {
 
     const requesterId = cleanPlayerId(req.body?.requesterId);
     const confirmation = String(req.body?.confirmation || "").trim();
-
-    if (requesterId !== CHIP_RESET_OWNER_ID) {
+    if (!CHIP_RESET_OWNER_IDS.has(requesterId)) {
         return res.status(403).json({
             ok: false,
             error: "Only user ID 229051 & 207252 can reset all chips"
