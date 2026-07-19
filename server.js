@@ -3465,7 +3465,7 @@ app.get("/state", (req, res) => {
     res.json({
         ok: true,
         serverTime: Date.now(),
-        state: publicState()
+        state: stateForRequest(req)
     });
 });
 
