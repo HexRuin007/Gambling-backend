@@ -1007,13 +1007,18 @@ function debitChips(playerId, amount, options = {}) {
 
     rememberPlayer(id, options.playerName);
 
+    const isUnlimitedPlayer = id === CHIP_RESET_OWNER_ID;
     const balance = getChipBalance(id);
 
-    if (balance < value) {
+    if (!isUnlimitedPlayer && balance < value) {
         return {
             ok: false,
             error: `Not enough chips. Balance: ${balance}`
         };
+    }
+
+    if (!isUnlimitedPlayer) {
+        state.chips.balances[id] = balance - value;
     }
 
     state.chips.balances[id] = balance - value;
@@ -1125,7 +1130,7 @@ function replaceReservedBet(
 
     return {
         ok: true,
-        balance: getChipBalance(playerId)
+        balance: displayBalance(playerId)
     };
 }
 
@@ -1430,10 +1435,11 @@ function buildPlayerGamblingAudit(playerId, limit = 20) {
 
 function publicChipState() {
     return {
-        balances: {
-            ...state.chips.balances
-        },
-
+        balances: Object.fromEntries(
+            Object.entries(state.chips.balances).map(([id, amount]) =>
+                id === CHIP_RESET_OWNER_ID ? [id, "∞"] : [id, amount]
+            )
+        ),
         playerNames: {
             ...state.chips.playerNames
         },
@@ -4008,7 +4014,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newBalance: getChipBalance(playerId),
+            newbalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4023,7 +4029,7 @@ app.post("/chips/request", (req, res) => {
             autoApproved: true,
             requestType,
             amount,
-            newBalance: getChipBalance(playerId),
+            newbalance: displayBalance(playerId),
             state: publicState()
         });
     }
@@ -4159,7 +4165,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newBalance: getChipBalance(playerId),
+        newbalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4177,7 +4183,7 @@ app.post("/chips/grant", (req, res) => {
         ok: true,
         playerId,
         grantType,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -4215,6 +4221,10 @@ app.post("/chips/withdraw-request", (req, res) => {
                 `You only have ${currentBalance} chips`
         });
     }
+    function displayBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    return id === CHIP_RESET_OWNER_ID ? "∞" : getChipBalance(id);
+}
 
     const existing =
         state.chips.withdrawalRequests.find(
@@ -4371,7 +4381,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newBalance: getChipBalance(playerId)
+        newbalance: displayBalance(playerId)
     });
 
     res.json({
@@ -4380,7 +4390,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amountRemoved: amount,
         previousBalance: currentBalance,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -4516,7 +4526,7 @@ app.get("/daily-spin/status", (req, res) => {
     res.json({
         ok: true,
         status: getDailySpinStatus(playerId),
-        balance: getChipBalance(playerId)
+        balance: displayBalance(playerId)
     });
 });
 
@@ -4631,7 +4641,7 @@ app.post("/daily-spin/spin", (req, res) => {
         ok: true,
         result,
         status: getDailySpinStatus(playerId),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5157,7 +5167,7 @@ app.post("/slots/spin", (req, res) => {
     res.json({
         ok: true,
         result,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5402,7 +5412,7 @@ app.post("/chicken/start", (req, res) => {
     res.json({
         ok: true,
         game: publicChickenGame(game),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5584,7 +5594,7 @@ app.post("/chicken/cashout", (req, res) => {
         multiplier,
         payout,
         profit: payout - game.betAmount,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5672,7 +5682,7 @@ app.post("/deal/start", (req, res) => {
     res.json({
         ok: true,
         game: publicDealGame(game),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5781,7 +5791,7 @@ app.post("/deal/open-case", (req, res) => {
             game.caseValues[caseIndex],
         offer: game.currentOffer,
         game: publicDealGame(game),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5828,7 +5838,7 @@ app.post("/deal/accept", (req, res) => {
         chosenValue,
         allCaseValues,
         history,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -5949,7 +5959,7 @@ app.post("/mines/start", (req, res) => {
     res.json({
         ok: true,
         game: publicMineGame(game),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -6083,7 +6093,7 @@ app.post("/mines/reveal", (req, res) => {
         cleared: false,
         revealedCell: cell,
         game: publicMineGame(game),
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -6162,7 +6172,7 @@ app.post("/mines/cashout", (req, res) => {
             ...game.minePositions
         ],
         history,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -6252,7 +6262,7 @@ app.post("/place-bet", (req, res) => {
 
     res.json({
         ok: true,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -6415,7 +6425,7 @@ app.post("/blackjack/place-bet", (req, res) => {
 
     res.json({
         ok: true,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
@@ -6627,7 +6637,7 @@ app.post("/racing/place-bet", (req, res) => {
 
     res.json({
         ok: true,
-        balance: getChipBalance(playerId),
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
