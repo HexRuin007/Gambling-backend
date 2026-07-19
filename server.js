@@ -8,7 +8,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_ID = "229051";
+const CHIP_RESET_OWNER_ID = "229051", "207252";
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -3859,7 +3859,7 @@ app.post("/chips/reset-all", (req, res) => {
     if (requesterId !== CHIP_RESET_OWNER_ID) {
         return res.status(403).json({
             ok: false,
-            error: "Only user ID 229051 can reset all chips"
+            error: "Only user ID 229051 & 207252 can reset all chips"
         });
     }
 
