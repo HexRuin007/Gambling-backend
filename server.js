@@ -8,7 +8,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252"]);
+const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
