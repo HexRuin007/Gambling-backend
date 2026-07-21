@@ -4018,7 +4018,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newbalance: displayBalance(playerId),
+            newBalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4169,7 +4169,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newbalance: displayBalance(playerId),
+        newBalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4382,7 +4382,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newbalance: displayBalance(playerId)
+        newBalance: displayBalance(playerId)
     });
 
     res.json({
@@ -4458,7 +4458,7 @@ app.post("/chips/withdrawal-approve", (req, res) => {
         playerName: request.playerName,
         amount: request.amount,
         previousBalance: currentBalance,
-        newbalance: displayBalance(request.playerId)
+        newBalance: displayBalance(request.playerId)
     });
 
     queueChipSave();
@@ -4520,6 +4520,7 @@ app.post("/chips/reject", (req, res) => {
             item.status === "pending"
     );
 
+
     if (!request) {
         return res.status(404).json({
             ok: false,
@@ -4531,6 +4532,14 @@ app.post("/chips/reject", (req, res) => {
         state.chips.requests.filter(
             item => item.requestId !== requestId
         );
+    addDiscordEvent("chip-request-denied", {
+    requestId,
+    playerId: request.playerId,
+    playerName: request.playerName,
+    amount: request.amount,
+    handledBy: "Banker (in-app)"
+});
+
 
     queueChipSave();
 
@@ -5129,6 +5138,14 @@ app.post(
             discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
+        addDiscordEvent("withdrawal-denied", {
+    withdrawalRequestId,
+    playerId: request.playerId,
+    playerName: request.playerName,
+    amount: request.amount,
+    handledBy: request.handledBy
+});
+
 
         queueChipSave();
 
