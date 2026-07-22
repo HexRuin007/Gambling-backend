@@ -56,7 +56,7 @@ const DAILY_SPIN_PRIZES = [
      oneTimeGlobal: true
     },
     
-    { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 62 },
+    { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
     { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 17 },
     { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 12 },
     { id: "chips_250m", type: "chips", label: "250M Chips", amount: 250_000_000, weight: 4 },
@@ -65,7 +65,7 @@ const DAILY_SPIN_PRIZES = [
     { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
     { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "25K x Random BXP", quantity: 1, weight: 1 },
 
-    { id: "nothing", type: "nothing", label: "Nothing", weight: 0 }
+    { id: "nothing", type: "nothing", label: "Nothing", weight: 26 }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
@@ -2986,9 +2986,36 @@ function isDailySpinPrizeAvailable(prize) {
 }
 
 function pickDailySpinPrize() {
+    const mk15Prize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "mk15"
+    );
+
+
+    if (
+        mk15Prize &&
+        isDailySpinPrizeAvailable(mk15Prize) &&
+        crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
+    ) {
+        return mk15Prize;
+    }
+
+    const grinderPrize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "grinder"
+    );
+
+
+    if (
+        grinderPrize &&
+        isDailySpinPrizeAvailable(grinderPrize) &&
+        crypto.randomInt(0, Grinder_DAILY_SPIN_ODDS) === 0
+    ) {
+        return grinderPrize;
+    }
+
     const availablePrizes = DAILY_SPIN_PRIZES.filter(
         prize =>
-            isDailySpinPrizeAvailable(prize)
+            isDailySpinPrizeAvailable(prize) &&
+            !prize.oneTimeGlobal
     );
 
     const totalWeight = availablePrizes.reduce(
@@ -3004,13 +3031,12 @@ function pickDailySpinPrize() {
 
     for (const prize of availablePrizes) {
         roll -= Math.max(0, Number(prize.weight || 0));
-        if (roll <= 0) {
-            return prize;
-        }
+        if (roll <= 0) return prize;
     }
 
     return availablePrizes[availablePrizes.length - 1];
 }
+
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
         .filter(isDailySpinPrizeAvailable)
@@ -3992,7 +4018,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newBalance: displayBalance(playerId),
+            newbalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4143,7 +4169,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newBalance: displayBalance(playerId),
+        newbalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4356,7 +4382,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newBalance: displayBalance(playerId)
+        newbalance: displayBalance(playerId)
     });
 
     res.json({
@@ -4366,117 +4392,6 @@ app.post("/chips/cashout", (req, res) => {
         amountRemoved: amount,
         previousBalance: currentBalance,
         balance: displayBalance(playerId),
-        state: publicState()
-    });
-});
-
-app.post("/chips/withdrawal-approve", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-
-    const withdrawalRequestId = String(
-        req.body?.withdrawalRequestId || ""
-    ).trim();
-
-    const request = state.chips.withdrawalRequests.find(
-        item =>
-            item.withdrawalRequestId === withdrawalRequestId &&
-            item.status === "pending"
-    );
-
-    if (!request) {
-        return res.status(404).json({
-            ok: false,
-            error: "Withdrawal request not found or already handled"
-        });
-    }
-
-    const currentBalance = getChipBalance(request.playerId);
-
-    if (currentBalance < request.amount) {
-        return res.status(400).json({
-            ok: false,
-            error: `Player only has ${currentBalance} chips`
-        });
-    }
-
-    const removed = debitChips(
-        request.playerId,
-        request.amount,
-        {
-            playerName: request.playerName,
-            type: "cashout",
-            gameType: "",
-            note: "Withdrawal approved by banker in-app"
-        }
-    );
-
-    if (!removed.ok) {
-        return res.status(400).json({
-            ok: false,
-            error: removed.error
-        });
-    }
-
-    const requesterId = cleanPlayerId(req.body?.requesterId);
-
-    request.status = "completed";
-    request.completedAt = Date.now();
-    request.amountCompleted = request.amount;
-    request.handledBy =
-        state.chips.playerNames[requesterId] || "Banker";
-    request.handledByDiscordId = null;
-
-    addDiscordEvent("withdrawal-completed", {
-        withdrawalRequestId,
-        playerId: request.playerId,
-        playerName: request.playerName,
-        amount: request.amount,
-        previousBalance: currentBalance,
-        newBalance: displayBalance(request.playerId)
-    });
-
-    queueChipSave();
-
-    res.json({
-        ok: true,
-        playerId: request.playerId,
-        amountRemoved: request.amount,
-        balance: displayBalance(request.playerId),
-        state: publicState()
-    });
-});
-
-app.post("/chips/withdrawal-deny", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-
-    const withdrawalRequestId = String(
-        req.body?.withdrawalRequestId || ""
-    ).trim();
-
-    const request = state.chips.withdrawalRequests.find(
-        item =>
-            item.withdrawalRequestId === withdrawalRequestId &&
-            item.status === "pending"
-    );
-
-    if (!request) {
-        return res.status(404).json({
-            ok: false,
-            error: "Withdrawal request not found or already handled"
-        });
-    }
-
-    const requesterId = cleanPlayerId(req.body?.requesterId);
-
-    request.status = "denied";
-    request.deniedAt = Date.now();
-    request.handledBy =
-        state.chips.playerNames[requesterId] || "Banker";
-
-    queueChipSave();
-
-    res.json({
-        ok: true,
         state: publicState()
     });
 });
@@ -4494,7 +4409,6 @@ app.post("/chips/reject", (req, res) => {
             item.status === "pending"
     );
 
-
     if (!request) {
         return res.status(404).json({
             ok: false,
@@ -4506,14 +4420,6 @@ app.post("/chips/reject", (req, res) => {
         state.chips.requests.filter(
             item => item.requestId !== requestId
         );
-    addDiscordEvent("chip-request-denied", {
-    requestId,
-    playerId: request.playerId,
-    playerName: request.playerName,
-    amount: request.amount,
-    handledBy: "Banker (in-app)"
-});
-
 
     queueChipSave();
 
@@ -4656,7 +4562,6 @@ app.post("/daily-spin/spin", (req, res) => {
     }
 
     const prize = pickDailySpinPrize();
-    console.log("Daily spin selected:", prize);
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
     let deliveryId = null;
@@ -5113,14 +5018,6 @@ app.post(
             discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
-        addDiscordEvent("withdrawal-denied", {
-    withdrawalRequestId,
-    playerId: request.playerId,
-    playerName: request.playerName,
-    amount: request.amount,
-    handledBy: request.handledBy
-});
-
 
         queueChipSave();
 
