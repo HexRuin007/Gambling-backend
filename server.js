@@ -2220,6 +2220,36 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     return shoe;
 }
 
+app.get("/debug/chip-file", (req, res) => {
+    const pin = String(req.query?.pin || "");
+    if (pin !== ADMIN_PIN) {
+        return res.status(403).json({ ok: false, error: "Not authorized" });
+    }
+
+    try {
+        const exists = fs.existsSync(CHIP_DATA_FILE);
+        if (!exists) {
+            return res.json({ ok: true, exists: false, path: CHIP_DATA_FILE });
+        }
+
+        const raw = fs.readFileSync(CHIP_DATA_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+
+        res.json({
+            ok: true,
+            exists: true,
+            path: CHIP_DATA_FILE,
+            savedAt: parsed.savedAt,
+            savedAtReadable: parsed.savedAt ? new Date(parsed.savedAt).toISOString() : null,
+            playerCount: Object.keys(parsed.balances || {}).length,
+            playerIds: Object.keys(parsed.balances || {}),
+            fileSizeBytes: Buffer.byteLength(raw, "utf8")
+        });
+    } catch (error) {
+        res.status(500).json({ ok: false, error: String(error.message || error) });
+    }
+});
+
 function drawCard(excludedCards = []) {
 
     if (!state.blackjack.deck.length) {
