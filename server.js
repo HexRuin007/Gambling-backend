@@ -34,8 +34,10 @@ const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
-const MK15_DAILY_SPIN_ODDS = 100_000;
-const Grinder_DAILY_SPIN_ODDS = 10_000;
+const MK15_DAILY_SPIN_ODDS_MIN = 100;
+const MK15_DAILY_SPIN_ODDS_MAX = 150_000;
+const Grinder_DAILY_SPIN_ODDS_MIN = 5;
+const Grinder_DAILY_SPIN_ODDS_MAX = 15_000;
 
 
 const DAILY_SPIN_PRIZES = [
@@ -157,7 +159,8 @@ const state = {
         bonusSpins: {},
         history: [],
         deliveries: {},
-        oneTimeClaims: {}
+        oneTimeClaims: {},
+        specialOdds: null
     },
 
     wheel: {
@@ -386,6 +389,9 @@ function loadChipData() {
             if (saved.dailySpin.oneTimeClaims && typeof saved.dailySpin.oneTimeClaims === "object") {
                 state.dailySpin.oneTimeClaims = saved.dailySpin.oneTimeClaims;
             }
+            if (saved.dailySpin.specialOdds && typeof saved.dailySpin.specialOdds === "object") {
+    state.dailySpin.specialOdds = saved.dailySpin.specialOdds;
+}
         }
 
         console.log(
@@ -454,7 +460,8 @@ function saveChipDataImmediately() {
                 bonusSpins: state.dailySpin.bonusSpins,
                 history: state.dailySpin.history,
                 deliveries: state.dailySpin.deliveries,
-                oneTimeClaims: state.dailySpin.oneTimeClaims
+                oneTimeClaims: state.dailySpin.oneTimeClaims,
+                specialOdds: state.dailySpin.specialOdds 
             },
             savedAt: Date.now()
         };
@@ -490,6 +497,43 @@ function queueChipSave() {
 
 function getUtcDateKey(timestamp = Date.now()) {
     return new Date(timestamp).toISOString().slice(0, 10);
+}
+function randomIntInRange(min, max) {
+    const lo = Math.floor(Math.min(min, max));
+    const hi = Math.floor(Math.max(min, max));
+    return crypto.randomInt(lo, hi + 1);
+}
+
+function getDailySpecialOdds() {
+    const today = getUtcDateKey();
+    const existing = state.dailySpin.specialOdds;
+
+    if (existing && existing.dateKey === today) {
+        return existing;
+    }
+
+    const rolled = {
+        dateKey: today,
+        mk15Odds: randomIntInRange(
+            MK15_DAILY_SPIN_ODDS_MIN,
+            MK15_DAILY_SPIN_ODDS_MAX
+        ),
+        grinderOdds: randomIntInRange(
+            Grinder_DAILY_SPIN_ODDS_MIN,
+            Grinder_DAILY_SPIN_ODDS_MAX
+        ),
+        createdAt: Date.now()
+    };
+
+    state.dailySpin.specialOdds = rolled;
+    queueChipSave();
+
+    console.log(
+        `Daily spin special odds rolled for ${today}: ` +
+        `MK15 1-in-${rolled.mk15Odds}, GrinderKnife 1-in-${rolled.grinderOdds}`
+    );
+
+    return rolled;
 }
 
 function getOrCreateDailyHouseStats(dateKey = getUtcDateKey()) {
@@ -2986,15 +3030,16 @@ function isDailySpinPrizeAvailable(prize) {
 }
 
 function pickDailySpinPrize() {
+    const specialOdds = getDailySpecialOdds();
+
     const mk15Prize = DAILY_SPIN_PRIZES.find(
         prize => prize.id === "mk15"
     );
 
-
     if (
         mk15Prize &&
         isDailySpinPrizeAvailable(mk15Prize) &&
-        crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
+        crypto.randomInt(0, specialOdds.mk15Odds) === 0
     ) {
         return mk15Prize;
     }
@@ -3003,11 +3048,10 @@ function pickDailySpinPrize() {
         prize => prize.id === "grinder"
     );
 
-
     if (
         grinderPrize &&
         isDailySpinPrizeAvailable(grinderPrize) &&
-        crypto.randomInt(0, Grinder_DAILY_SPIN_ODDS) === 0
+        crypto.randomInt(0, specialOdds.grinderOdds) === 0
     ) {
         return grinderPrize;
     }
