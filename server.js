@@ -120,7 +120,8 @@ const state = {
         leaderboardStats: {},
         fundingBalances: {},
         lastBetFunding: {},
-        blacklist: {}
+        blacklist: {},
+        peakBalances: {}
     },
     slots: {
         history: [],
@@ -199,6 +200,9 @@ function loadChipData() {
         fs.mkdirSync(DATA_DIRECTORY, {
             recursive: true
         });
+        if (saved.peakBalances && typeof saved.peakBalances === "object") {
+    state.chips.peakBalances = saved.peakBalances;
+}
 
         if (!fs.existsSync(CHIP_DATA_FILE)) {
             console.log(
@@ -423,6 +427,7 @@ function saveChipDataImmediately() {
             dailyHouseStats: state.chips.dailyHouseStats,
             leaderboardStats: state.chips.leaderboardStats,
             fundingBalances: state.chips.fundingBalances,
+             peakBalances: state.chips.peakBalances,
             blacklist: state.chips.blacklist,
             slots: {
                 history: state.slots.history,
@@ -992,7 +997,7 @@ function creditChips(playerId, amount, options = {}) {
             });
         }
     }
-
+   updatePeakBalance(id);
     queueChipSave();
 
     return true;
@@ -1078,12 +1083,37 @@ function debitChips(playerId, amount, options = {}) {
         });
     }
 
-    queueChipSave();
+if (options.type === "cashout") {
+    resetPeakBalance(id);   
+} else {
+    updatePeakBalance(id);  
+}
 
-    return {
-        ok: true,
-        balance: state.chips.balances[id]
-    };
+queueChipSave();
+
+return {
+    ok: true,
+    balance: state.chips.balances[id]
+};
+
+function updatePeakBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return;
+
+    const current = Math.max(0, Math.floor(Number(state.chips.balances[id] || 0)));
+    const existingPeak = Math.max(0, Math.floor(Number(state.chips.peakBalances[id] || 0)));
+
+    if (current > existingPeak) {
+        state.chips.peakBalances[id] = current;
+    } else if (state.chips.peakBalances[id] === undefined) {
+        state.chips.peakBalances[id] = current;
+    }
+}
+
+function resetPeakBalance(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return;
+    state.chips.peakBalances[id] = Math.max(0, Math.floor(Number(state.chips.balances[id] || 0)));
 }
 
 function replaceReservedBet(
@@ -1439,18 +1469,20 @@ function buildPlayerGamblingAudit(playerId, limit = 20) {
 function getMaxBalanceSinceLastWithdrawal(playerId) {
     const id = cleanPlayerId(playerId);
 
-    const transactions = state.chips.transactions
-        .filter(transaction => cleanPlayerId(transaction.playerId) === id)
-        .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+    const lastCashout = [...state.chips.transactions]
+        .filter(t => cleanPlayerId(t.playerId) === id && t.type === "cashout")
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
 
-    let lastWithdrawalIndex = -1;
+    const currentBalance = getChipBalance(id);
+    const trackedPeak = Math.max(0, Math.floor(Number(state.chips.peakBalances[id] || 0)));
 
-    transactions.forEach((transaction, index) => {
-        if (transaction.type === "cashout") {
-            lastWithdrawalIndex = index;
-        }
-    });
-
+    return {
+        maxBalanceSinceLastWithdrawal: Math.max(trackedPeak, currentBalance),
+        lastWithdrawalAt: lastCashout?.createdAt || null,
+        lastWithdrawalAmount: lastCashout ? Math.abs(Number(lastCashout.amount || 0)) : null,
+        hadWithdrawal: Boolean(lastCashout)
+    };
+}
     const relevantTransactions =
         lastWithdrawalIndex >= 0
             ? transactions.slice(lastWithdrawalIndex + 1)
