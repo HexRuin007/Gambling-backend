@@ -2986,36 +2986,9 @@ function isDailySpinPrizeAvailable(prize) {
 }
 
 function pickDailySpinPrize() {
-    const mk15Prize = DAILY_SPIN_PRIZES.find(
-        prize => prize.id === "mk15"
-    );
-
-
-    if (
-        mk15Prize &&
-        isDailySpinPrizeAvailable(mk15Prize) &&
-        crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
-    ) {
-        return mk15Prize;
-    }
-
-    const grinderPrize = DAILY_SPIN_PRIZES.find(
-        prize => prize.id === "grinder"
-    );
-
-
-    if (
-        grinderPrize &&
-        isDailySpinPrizeAvailable(grinderPrize) &&
-        crypto.randomInt(0, Grinder_DAILY_SPIN_ODDS) === 0
-    ) {
-        return grinderPrize;
-    }
-
     const availablePrizes = DAILY_SPIN_PRIZES.filter(
         prize =>
-            isDailySpinPrizeAvailable(prize) &&
-            !prize.oneTimeGlobal
+            isDailySpinPrizeAvailable(prize)
     );
 
     const totalWeight = availablePrizes.reduce(
@@ -3031,12 +3004,13 @@ function pickDailySpinPrize() {
 
     for (const prize of availablePrizes) {
         roll -= Math.max(0, Number(prize.weight || 0));
-        if (roll <= 0) return prize;
+        if (roll <= 0) {
+            return prize;
+        }
     }
 
     return availablePrizes[availablePrizes.length - 1];
 }
-
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
         .filter(isDailySpinPrizeAvailable)
@@ -4682,6 +4656,7 @@ app.post("/daily-spin/spin", (req, res) => {
     }
 
     const prize = pickDailySpinPrize();
+    console.log("Daily spin selected:", prize);
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
     let deliveryId = null;
