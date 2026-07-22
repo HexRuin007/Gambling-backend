@@ -5,7 +5,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
-
+//redeploy
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
 const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991"]);
