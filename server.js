@@ -200,9 +200,7 @@ function loadChipData() {
         fs.mkdirSync(DATA_DIRECTORY, {
             recursive: true
         });
-        if (saved.peakBalances && typeof saved.peakBalances === "object") {
-    state.chips.peakBalances = saved.peakBalances;
-}
+   
 
         if (!fs.existsSync(CHIP_DATA_FILE)) {
             console.log(
@@ -294,6 +292,9 @@ function loadChipData() {
 
         if (saved.fundingBalances && typeof saved.fundingBalances === "object") {
             state.chips.fundingBalances = saved.fundingBalances;
+        }
+        if (saved.peakBalances && typeof saved.peakBalances === "object") {
+            state.chips.peakBalances = saved.peakBalances;
         }
 
         
@@ -1095,6 +1096,7 @@ return {
     ok: true,
     balance: state.chips.balances[id]
 };
+}
 
 function updatePeakBalance(playerId) {
     const id = cleanPlayerId(playerId);
