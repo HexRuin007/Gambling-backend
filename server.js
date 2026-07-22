@@ -4086,7 +4086,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newbalance: displayBalance(playerId),
+            newBalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4101,7 +4101,7 @@ app.post("/chips/request", (req, res) => {
             autoApproved: true,
             requestType,
             amount,
-            newbalance: displayBalance(playerId),
+            newBalance: displayBalance(playerId),
             state: publicState()
         });
     }
@@ -4237,7 +4237,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newbalance: displayBalance(playerId),
+        newBalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4450,7 +4450,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newbalance: displayBalance(playerId)
+        newBalance: displayBalance(playerId)
     });
 
     res.json({
