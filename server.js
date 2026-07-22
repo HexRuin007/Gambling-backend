@@ -6736,35 +6736,6 @@ app.post("/racing/place-bet", (req, res) => {
     });
 });
 
-app.get("/debug/chip-file", (req, res) => {
-    const pin = String(req.query?.pin || "");
-    if (pin !== ADMIN_PIN) {
-        return res.status(403).json({ ok: false, error: "Not authorized" });
-    }
-
-    try {
-        const exists = fs.existsSync(CHIP_DATA_FILE);
-        if (!exists) {
-            return res.json({ ok: true, exists: false, path: CHIP_DATA_FILE });
-        }
-
-        const raw = fs.readFileSync(CHIP_DATA_FILE, "utf8");
-        const parsed = JSON.parse(raw);
-
-        res.json({
-            ok: true,
-            exists: true,
-            path: CHIP_DATA_FILE,
-            savedAt: parsed.savedAt,
-            savedAtReadable: parsed.savedAt ? new Date(parsed.savedAt).toISOString() : null,
-            playerCount: Object.keys(parsed.balances || {}).length,
-            playerIds: Object.keys(parsed.balances || {}),
-            fileSizeBytes: Buffer.byteLength(raw, "utf8")
-        });
-    } catch (error) {
-        res.status(500).json({ ok: false, error: String(error.message || error) });
-    }
-});
 
 
 app.post("/racing/confirm-all", (req, res) => {
@@ -6806,34 +6777,7 @@ app.post("/racing/clear", (req, res) => {
     });
 });
 
-app.get("/debug/transaction-players", (req, res) => {
-    const pin = String(req.query?.pin || "");
-    if (pin !== ADMIN_PIN) {
-        return res.status(403).json({ ok: false, error: "Not authorized" });
-    }
 
-    const raw = fs.readFileSync(CHIP_DATA_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    const transactions = parsed.transactions || [];
-
-    const uniquePlayers = {};
-    for (const t of transactions) {
-        if (!uniquePlayers[t.playerId]) {
-            uniquePlayers[t.playerId] = {
-                playerId: t.playerId,
-                playerName: t.playerName,
-                lastSeenBalance: t.balanceAfter,
-                lastSeenAt: t.createdAt
-            };
-        }
-    }
-
-    res.json({
-        ok: true,
-        uniquePlayerCount: Object.keys(uniquePlayers).length,
-        players: Object.values(uniquePlayers)
-    });
-});
 
 app.post("/racing/start", (req, res) => {
     if (!requireAdmin(req, res)) return;
