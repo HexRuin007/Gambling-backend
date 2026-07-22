@@ -6806,6 +6806,35 @@ app.post("/racing/clear", (req, res) => {
     });
 });
 
+app.get("/debug/transaction-players", (req, res) => {
+    const pin = String(req.query?.pin || "");
+    if (pin !== ADMIN_PIN) {
+        return res.status(403).json({ ok: false, error: "Not authorized" });
+    }
+
+    const raw = fs.readFileSync(CHIP_DATA_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    const transactions = parsed.transactions || [];
+
+    const uniquePlayers = {};
+    for (const t of transactions) {
+        if (!uniquePlayers[t.playerId]) {
+            uniquePlayers[t.playerId] = {
+                playerId: t.playerId,
+                playerName: t.playerName,
+                lastSeenBalance: t.balanceAfter,
+                lastSeenAt: t.createdAt
+            };
+        }
+    }
+
+    res.json({
+        ok: true,
+        uniquePlayerCount: Object.keys(uniquePlayers).length,
+        players: Object.values(uniquePlayers)
+    });
+});
+
 app.post("/racing/start", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
