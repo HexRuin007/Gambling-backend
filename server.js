@@ -8,7 +8,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991"]);
+const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -34,10 +34,8 @@ const DEAL_CASE_COUNT = 16;
 const DEAL_CASES_PER_ROUND = 3;
 const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
-const MK15_DAILY_SPIN_ODDS_MIN = 100;
-const MK15_DAILY_SPIN_ODDS_MAX = 10_000;
-const Grinder_DAILY_SPIN_ODDS_MIN = 5;
-const Grinder_DAILY_SPIN_ODDS_MAX = 1500;
+const MK15_DAILY_SPIN_ODDS = 100_000;
+const Grinder_DAILY_SPIN_ODDS = 10_000;
 
 
 const DAILY_SPIN_PRIZES = [
@@ -159,8 +157,7 @@ const state = {
         bonusSpins: {},
         history: [],
         deliveries: {},
-        oneTimeClaims: {},
-        specialOdds: null
+        oneTimeClaims: {}
     },
 
     wheel: {
@@ -389,9 +386,6 @@ function loadChipData() {
             if (saved.dailySpin.oneTimeClaims && typeof saved.dailySpin.oneTimeClaims === "object") {
                 state.dailySpin.oneTimeClaims = saved.dailySpin.oneTimeClaims;
             }
-            if (saved.dailySpin.specialOdds && typeof saved.dailySpin.specialOdds === "object") {
-    state.dailySpin.specialOdds = saved.dailySpin.specialOdds;
-}
         }
 
         console.log(
@@ -460,8 +454,7 @@ function saveChipDataImmediately() {
                 bonusSpins: state.dailySpin.bonusSpins,
                 history: state.dailySpin.history,
                 deliveries: state.dailySpin.deliveries,
-                oneTimeClaims: state.dailySpin.oneTimeClaims,
-                specialOdds: state.dailySpin.specialOdds 
+                oneTimeClaims: state.dailySpin.oneTimeClaims
             },
             savedAt: Date.now()
         };
@@ -497,50 +490,6 @@ function queueChipSave() {
 
 function getUtcDateKey(timestamp = Date.now()) {
     return new Date(timestamp).toISOString().slice(0, 10);
-}
-function randomIntInRange(min, max) {
-    const lo = Math.floor(Math.min(min, max));
-    const hi = Math.floor(Math.max(min, max));
-    return crypto.randomInt(lo, hi + 1);
-}
-
-function getDailySpecialOdds() {
-    console.log("getDailySpecialOdds() called");
-    const today = getUtcDateKey();
-    const existing = state.dailySpin.specialOdds;
-
-
- if (existing && existing.dateKey === today) {
-    console.log(
-        `Today's odds: MK15 1-in-${existing.mk15Odds}, GrinderKnife 1-in-${existing.grinderOdds}`
-    );
-    return existing;
-}
-
-    const rolled = {
-        dateKey: today,
-        mk15Odds: randomIntInRange(
-            MK15_DAILY_SPIN_ODDS_MIN,
-            MK15_DAILY_SPIN_ODDS_MAX
-        ),
-        grinderOdds: randomIntInRange(
-            Grinder_DAILY_SPIN_ODDS_MIN,
-            Grinder_DAILY_SPIN_ODDS_MAX
-        ),
-        createdAt: Date.now()
-    };
-
-    
-
-    state.dailySpin.specialOdds = rolled;
-    queueChipSave();
-
-    console.log(
-        `Daily spin special odds rolled for ${today}: ` +
-        `MK15 1-in-${rolled.mk15Odds}, GrinderKnife 1-in-${rolled.grinderOdds}`
-    );
-
-    return rolled;
 }
 
 function getOrCreateDailyHouseStats(dateKey = getUtcDateKey()) {
@@ -2509,10 +2458,7 @@ function pickWeightedHorseWinner(dailyOdds) {
         weight: Math.max(1, Math.round(horse.winChance * scale))
     }));
     const totalWeight = weighted.reduce((sum, horse) => sum + horse.weight, 0);
-   let roll = crypto.randomInt(1, totalWeight + 1);
-
-console.log("Total weight:", totalWeight);
-console.log("Roll:", roll);
+    let roll = crypto.randomInt(1, totalWeight + 1);
 
     for (const horse of weighted) {
         roll -= horse.weight;
@@ -3039,37 +2985,57 @@ function isDailySpinPrizeAvailable(prize) {
     );
 }
 
-const totalWeight = availablePrizes.reduce(
-    (sum, prize) => sum + Number(prize.weight || 0),
-    0
-);
-
-const roll = Math.random() * totalWeight;
-
-console.log("Total weight:", totalWeight);
-console.log("Roll:", roll);
-
-let running = 0;
-
-for (const prize of availablePrizes) {
-    running += Number(prize.weight || 0);
-
-    console.log(
-        prize.id,
-        "running:",
-        running,
-        "roll:",
-        roll
+function pickDailySpinPrize() {
+    const mk15Prize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "mk15"
     );
 
-    if (roll < running) {
-        console.log("Selected:", prize.id);
-        return prize;
-    }
-}
 
-console.log("Fallback:", availablePrizes[availablePrizes.length - 1].id);
-return availablePrizes[availablePrizes.length - 1];
+    if (
+        mk15Prize &&
+        isDailySpinPrizeAvailable(mk15Prize) &&
+        crypto.randomInt(0, MK15_DAILY_SPIN_ODDS) === 0
+    ) {
+        return mk15Prize;
+    }
+
+    const grinderPrize = DAILY_SPIN_PRIZES.find(
+        prize => prize.id === "grinder"
+    );
+
+
+    if (
+        grinderPrize &&
+        isDailySpinPrizeAvailable(grinderPrize) &&
+        crypto.randomInt(0, Grinder_DAILY_SPIN_ODDS) === 0
+    ) {
+        return grinderPrize;
+    }
+
+    const availablePrizes = DAILY_SPIN_PRIZES.filter(
+        prize =>
+            isDailySpinPrizeAvailable(prize) &&
+            !prize.oneTimeGlobal
+    );
+
+    const totalWeight = availablePrizes.reduce(
+        (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
+        0
+    );
+
+    if (totalWeight <= 0) {
+        throw new Error("Daily spin prize weights must total more than zero");
+    }
+
+    let roll = crypto.randomInt(1, totalWeight + 1);
+
+    for (const prize of availablePrizes) {
+        roll -= Math.max(0, Number(prize.weight || 0));
+        if (roll <= 0) return prize;
+    }
+
+    return availablePrizes[availablePrizes.length - 1];
+}
 
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
@@ -4052,7 +4018,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newBalance: displayBalance(playerId),
+            newbalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4203,7 +4169,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newBalance: displayBalance(playerId),
+        newbalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4416,7 +4382,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newBalance: displayBalance(playerId)
+        newbalance: displayBalance(playerId)
     });
 
     res.json({
@@ -4426,117 +4392,6 @@ app.post("/chips/cashout", (req, res) => {
         amountRemoved: amount,
         previousBalance: currentBalance,
         balance: displayBalance(playerId),
-        state: publicState()
-    });
-});
-
-app.post("/chips/withdrawal-approve", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-
-    const withdrawalRequestId = String(
-        req.body?.withdrawalRequestId || ""
-    ).trim();
-
-    const request = state.chips.withdrawalRequests.find(
-        item =>
-            item.withdrawalRequestId === withdrawalRequestId &&
-            item.status === "pending"
-    );
-
-    if (!request) {
-        return res.status(404).json({
-            ok: false,
-            error: "Withdrawal request not found or already handled"
-        });
-    }
-
-    const currentBalance = getChipBalance(request.playerId);
-
-    if (currentBalance < request.amount) {
-        return res.status(400).json({
-            ok: false,
-            error: `Player only has ${currentBalance} chips`
-        });
-    }
-
-    const removed = debitChips(
-        request.playerId,
-        request.amount,
-        {
-            playerName: request.playerName,
-            type: "cashout",
-            gameType: "",
-            note: "Withdrawal approved by banker in-app"
-        }
-    );
-
-    if (!removed.ok) {
-        return res.status(400).json({
-            ok: false,
-            error: removed.error
-        });
-    }
-
-    const requesterId = cleanPlayerId(req.body?.requesterId);
-
-    request.status = "completed";
-    request.completedAt = Date.now();
-    request.amountCompleted = request.amount;
-    request.handledBy =
-        state.chips.playerNames[requesterId] || "Banker";
-    request.handledByDiscordId = null;
-
-    addDiscordEvent("withdrawal-completed", {
-        withdrawalRequestId,
-        playerId: request.playerId,
-        playerName: request.playerName,
-        amount: request.amount,
-        previousBalance: currentBalance,
-        newBalance: displayBalance(request.playerId)
-    });
-
-    queueChipSave();
-
-    res.json({
-        ok: true,
-        playerId: request.playerId,
-        amountRemoved: request.amount,
-        balance: displayBalance(request.playerId),
-        state: publicState()
-    });
-});
-
-app.post("/chips/withdrawal-deny", (req, res) => {
-    if (!requireAdmin(req, res)) return;
-
-    const withdrawalRequestId = String(
-        req.body?.withdrawalRequestId || ""
-    ).trim();
-
-    const request = state.chips.withdrawalRequests.find(
-        item =>
-            item.withdrawalRequestId === withdrawalRequestId &&
-            item.status === "pending"
-    );
-
-    if (!request) {
-        return res.status(404).json({
-            ok: false,
-            error: "Withdrawal request not found or already handled"
-        });
-    }
-
-    const requesterId = cleanPlayerId(req.body?.requesterId);
-
-    request.status = "denied";
-    request.deniedAt = Date.now();
-    request.handledBy =
-        state.chips.playerNames[requesterId] || "Banker";
-
-    queueChipSave();
-
-    res.json({
-        ok: true,
         state: publicState()
     });
 });
@@ -4554,7 +4409,6 @@ app.post("/chips/reject", (req, res) => {
             item.status === "pending"
     );
 
-
     if (!request) {
         return res.status(404).json({
             ok: false,
@@ -4566,14 +4420,6 @@ app.post("/chips/reject", (req, res) => {
         state.chips.requests.filter(
             item => item.requestId !== requestId
         );
-    addDiscordEvent("chip-request-denied", {
-    requestId,
-    playerId: request.playerId,
-    playerName: request.playerName,
-    amount: request.amount,
-    handledBy: "Banker (in-app)"
-});
-
 
     queueChipSave();
 
@@ -4715,16 +4561,7 @@ app.post("/daily-spin/spin", (req, res) => {
         state.dailySpin.bonusSpins[playerId] = bonusSpins - 1;
     }
 
-   const prize = pickDailySpinPrize();
-
-console.log("Prize picked:", prize);
-
-if (!prize) {
-    return res.status(500).json({
-        ok: false,
-        error: "pickDailySpinPrize() returned undefined"
-    });
-}
+    const prize = pickDailySpinPrize();
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
     let deliveryId = null;
@@ -4795,13 +4632,8 @@ if (!prize) {
         deliveryStatus: deliveryId ? "pending" : null,
         createdAt
     };
-console.log("Prize picked:", prize);
 
-console.log("Result created:", result);
     state.dailySpin.claims[playerId] = result;
-    console.log("Stored claim:", state.dailySpin.claims[playerId]);
-
-console.log("Status:", getDailySpinStatus(playerId).lastResult);
     state.dailySpin.history.unshift(result);
     state.dailySpin.history = state.dailySpin.history.slice(0, DAILY_SPIN_MAX_HISTORY);
     queueChipSave();
@@ -5186,14 +5018,6 @@ app.post(
             discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
-        addDiscordEvent("withdrawal-denied", {
-    withdrawalRequestId,
-    playerId: request.playerId,
-    playerName: request.playerName,
-    amount: request.amount,
-    handledBy: request.handledBy
-});
-
 
         queueChipSave();
 
