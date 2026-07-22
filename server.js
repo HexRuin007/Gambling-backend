@@ -4816,8 +4816,13 @@ if (!prize) {
         deliveryStatus: deliveryId ? "pending" : null,
         createdAt
     };
+console.log("Prize picked:", prize);
 
+console.log("Result created:", result);
     state.dailySpin.claims[playerId] = result;
+    console.log("Stored claim:", state.dailySpin.claims[playerId]);
+
+console.log("Status:", getDailySpinStatus(playerId).lastResult);
     state.dailySpin.history.unshift(result);
     state.dailySpin.history = state.dailySpin.history.slice(0, DAILY_SPIN_MAX_HISTORY);
     queueChipSave();
