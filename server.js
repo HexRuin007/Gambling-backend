@@ -3063,13 +3063,13 @@ function pickDailySpinPrize() {
         return grinderPrize;
     }
 
-    const availablePrizes = DAILY_SPIN_PRIZES.filter(
-        console.log("Available prizes:", availablePrizes);
-        prize =>
-            isDailySpinPrizeAvailable(prize) &&
-            !prize.oneTimeGlobal
-    );
-    console.log(availablePrizes);
+const availablePrizes = DAILY_SPIN_PRIZES.filter(prize =>
+    prize.weight > 0 &&
+    isDailySpinPrizeAvailable(prize) &&
+    !prize.oneTimeGlobal
+);
+
+console.log("Available prizes:", availablePrizes);
 
     const totalWeight = availablePrizes.reduce(
         (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
