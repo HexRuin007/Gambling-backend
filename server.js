@@ -2509,7 +2509,10 @@ function pickWeightedHorseWinner(dailyOdds) {
         weight: Math.max(1, Math.round(horse.winChance * scale))
     }));
     const totalWeight = weighted.reduce((sum, horse) => sum + horse.weight, 0);
-    let roll = crypto.randomInt(1, totalWeight + 1);
+   let roll = crypto.randomInt(1, totalWeight + 1);
+
+console.log("Total weight:", totalWeight);
+console.log("Roll:", roll);
 
     for (const horse of weighted) {
         roll -= horse.weight;
@@ -3036,61 +3039,37 @@ function isDailySpinPrizeAvailable(prize) {
     );
 }
 
-function pickDailySpinPrize() {
-    const specialOdds = getDailySpecialOdds();
+const totalWeight = availablePrizes.reduce(
+    (sum, prize) => sum + Number(prize.weight || 0),
+    0
+);
 
-    const mk15Prize = DAILY_SPIN_PRIZES.find(
-        prize => prize.id === "mk15"
+const roll = Math.random() * totalWeight;
+
+console.log("Total weight:", totalWeight);
+console.log("Roll:", roll);
+
+let running = 0;
+
+for (const prize of availablePrizes) {
+    running += Number(prize.weight || 0);
+
+    console.log(
+        prize.id,
+        "running:",
+        running,
+        "roll:",
+        roll
     );
 
-    if (
-        mk15Prize &&
-        isDailySpinPrizeAvailable(mk15Prize) &&
-        crypto.randomInt(0, specialOdds.mk15Odds) === 0
-    ) {
-        return mk15Prize;
+    if (roll < running) {
+        console.log("Selected:", prize.id);
+        return prize;
     }
-
-    const grinderPrize = DAILY_SPIN_PRIZES.find(
-        prize => prize.id === "grinder"
-    );
-
-    if (
-        grinderPrize &&
-        isDailySpinPrizeAvailable(grinderPrize) &&
-        crypto.randomInt(0, specialOdds.grinderOdds) === 0
-    ) {
-        return grinderPrize;
-    }
-
-    const availablePrizes = DAILY_SPIN_PRIZES.filter(prize =>
-        prize.weight > 0 &&
-        isDailySpinPrizeAvailable(prize) &&
-        !prize.oneTimeGlobal &&
-        prize.id !== "mk15" &&
-        prize.id !== "grinder"
-    );
-
-    console.log("Available prizes:", availablePrizes);
-
-    const totalWeight = availablePrizes.reduce(
-        (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
-        0
-    );
-
-    if (totalWeight <= 0) {
-        throw new Error("Daily spin prize weights must total more than zero");
-    }
-
-    let roll = crypto.randomInt(1, totalWeight + 1);
-
-    for (const prize of availablePrizes) {
-        roll -= Math.max(0, Number(prize.weight || 0));
-        if (roll <= 0) return prize;
-    }
-
-    return availablePrizes[availablePrizes.length - 1];
 }
+
+console.log("Fallback:", availablePrizes[availablePrizes.length - 1].id);
+return availablePrizes[availablePrizes.length - 1];
 
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
