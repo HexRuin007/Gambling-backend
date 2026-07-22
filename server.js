@@ -525,6 +525,8 @@ function getDailySpecialOdds() {
         createdAt: Date.now()
     };
 
+    console.log(state.dailySpin.specialOdds);
+
     state.dailySpin.specialOdds = rolled;
     queueChipSave();
 
