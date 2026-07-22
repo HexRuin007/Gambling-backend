@@ -505,12 +505,17 @@ function randomIntInRange(min, max) {
 }
 
 function getDailySpecialOdds() {
+    console.log("getDailySpecialOdds() called");
     const today = getUtcDateKey();
     const existing = state.dailySpin.specialOdds;
 
-    if (existing && existing.dateKey === today) {
-        return existing;
-    }
+
+ if (existing && existing.dateKey === today) {
+    console.log(
+        `Today's odds: MK15 1-in-${existing.mk15Odds}, GrinderKnife 1-in-${existing.grinderOdds}`
+    );
+    return existing;
+}
 
     const rolled = {
         dateKey: today,
@@ -525,7 +530,7 @@ function getDailySpecialOdds() {
         createdAt: Date.now()
     };
 
-    console.log(state.dailySpin.specialOdds);
+    
 
     state.dailySpin.specialOdds = rolled;
     queueChipSave();
