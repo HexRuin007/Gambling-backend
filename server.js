@@ -39,7 +39,7 @@ const MK15_DAILY_SPIN_ODDS_MAX = 10_000;
 const Grinder_DAILY_SPIN_ODDS_MIN = 5;
 const Grinder_DAILY_SPIN_ODDS_MAX = 1500;
 
-console.log("Available prizes:", availablePrizes);
+
 const DAILY_SPIN_PRIZES = [
     {
         id: "mk15",
@@ -3064,10 +3064,12 @@ function pickDailySpinPrize() {
     }
 
     const availablePrizes = DAILY_SPIN_PRIZES.filter(
+        console.log("Available prizes:", availablePrizes);
         prize =>
             isDailySpinPrizeAvailable(prize) &&
             !prize.oneTimeGlobal
     );
+    console.log(availablePrizes);
 
     const totalWeight = availablePrizes.reduce(
         (sum, prize) => sum + Math.max(0, Number(prize.weight || 0)),
@@ -4732,7 +4734,16 @@ app.post("/daily-spin/spin", (req, res) => {
         state.dailySpin.bonusSpins[playerId] = bonusSpins - 1;
     }
 
-    const prize = pickDailySpinPrize();
+   const prize = pickDailySpinPrize();
+
+console.log("Prize picked:", prize);
+
+if (!prize) {
+    return res.status(500).json({
+        ok: false,
+        error: "pickDailySpinPrize() returned undefined"
+    });
+}
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
     let deliveryId = null;
