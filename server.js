@@ -39,7 +39,7 @@ const MK15_DAILY_SPIN_ODDS_MAX = 10_000;
 const Grinder_DAILY_SPIN_ODDS_MIN = 5;
 const Grinder_DAILY_SPIN_ODDS_MAX = 1500;
 
-
+console.log("Available prizes:", availablePrizes);
 const DAILY_SPIN_PRIZES = [
     {
         id: "mk15",
