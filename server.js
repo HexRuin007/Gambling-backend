@@ -1473,50 +1473,64 @@ function getMaxBalanceSinceLastWithdrawal(playerId) {
         .filter(t => cleanPlayerId(t.playerId) === id && t.type === "cashout")
         .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
 
+    const sinceTimestamp = Number(lastCashout?.createdAt || 0);
+
     const currentBalance = getChipBalance(id);
     const trackedPeak = Math.max(0, Math.floor(Number(state.chips.peakBalances[id] || 0)));
+
+    const transactionsSince = state.chips.transactions.filter(transaction =>
+        cleanPlayerId(transaction.playerId) === id &&
+        Number(transaction.createdAt || 0) > sinceTimestamp
+    );
+
+    const grants = transactionsSince.filter(t =>
+        t.type === "banker-grant" &&
+        (t.grantType === "paid" || t.grantType === "free")
+    );
+
+    const paidGrantAmount = grants
+        .filter(t => t.grantType === "paid")
+        .reduce((sum, t) => sum + Math.max(0, Number(t.amount || 0)), 0);
+
+    const freeGrantAmount = grants
+        .filter(t => t.grantType === "free")
+        .reduce((sum, t) => sum + Math.max(0, Number(t.amount || 0)), 0);
+
+    const paidGrantCount = grants.filter(t => t.grantType === "paid").length;
+    const freeGrantCount = grants.filter(t => t.grantType === "free").length;
+
+
+    const welcomeBonusTransactions = transactionsSince.filter(
+        t => t.type === "welcome-bonus"
+    );
+    const welcomeBonusAmount = welcomeBonusTransactions
+        .reduce((sum, t) => sum + Math.max(0, Number(t.amount || 0)), 0);
+    const welcomeBonusCount = welcomeBonusTransactions.length;
+
+ 
+    const dailySpinTransactions = transactionsSince.filter(
+        t => t.type === "daily-spin-prize"
+    );
+    const dailySpinAmount = dailySpinTransactions
+        .reduce((sum, t) => sum + Math.max(0, Number(t.amount || 0)), 0);
+    const dailySpinCount = dailySpinTransactions.length;
 
     return {
         maxBalanceSinceLastWithdrawal: Math.max(trackedPeak, currentBalance),
         lastWithdrawalAt: lastCashout?.createdAt || null,
         lastWithdrawalAmount: lastCashout ? Math.abs(Number(lastCashout.amount || 0)) : null,
-        hadWithdrawal: Boolean(lastCashout)
-    };
-}
-    const relevantTransactions =
-        lastWithdrawalIndex >= 0
-            ? transactions.slice(lastWithdrawalIndex + 1)
-            : transactions;
+        hadWithdrawal: Boolean(lastCashout),
 
-    const lastWithdrawalAt =
-        lastWithdrawalIndex >= 0
-            ? transactions[lastWithdrawalIndex].createdAt
-            : null;
+        paidChipsSinceLastWithdrawal: paidGrantAmount,
+        freeChipsSinceLastWithdrawal: freeGrantAmount,
+        paidGrantCountSinceLastWithdrawal: paidGrantCount,
+        freeGrantCountSinceLastWithdrawal: freeGrantCount,
 
-    const lastWithdrawalAmount =
-        lastWithdrawalIndex >= 0
-            ? Math.abs(Number(transactions[lastWithdrawalIndex].amount || 0))
-            : null;
-
-    let maxBalance = 0;
-
-    for (const transaction of relevantTransactions) {
-        const balance = Number(transaction.balanceAfter || 0);
-        if (balance > maxBalance) {
-            maxBalance = balance;
-        }
-    }
-
-    const currentBalance = getChipBalance(id);
-    if (currentBalance > maxBalance) {
-        maxBalance = currentBalance;
-    }
-
-    return {
-        maxBalanceSinceLastWithdrawal: maxBalance,
-        lastWithdrawalAt,
-        lastWithdrawalAmount,
-        hadWithdrawal: lastWithdrawalIndex >= 0
+        // NEW
+        welcomeBonusSinceLastWithdrawal: welcomeBonusAmount,
+        welcomeBonusCountSinceLastWithdrawal: welcomeBonusCount,
+        dailySpinChipsSinceLastWithdrawal: dailySpinAmount,
+        dailySpinCountSinceLastWithdrawal: dailySpinCount
     };
 }
 function publicChipState() {
@@ -3719,7 +3733,15 @@ app.get("/chips/player-audit", (req, res) => {
             maxBalanceSinceLastWithdrawal: withdrawalAudit.maxBalanceSinceLastWithdrawal, 
             lastWithdrawalAt: withdrawalAudit.lastWithdrawalAt,                           
             lastWithdrawalAmount: withdrawalAudit.lastWithdrawalAmount,                   
-            hadWithdrawal: withdrawalAudit.hadWithdrawal                                  
+            hadWithdrawal: withdrawalAudit.hadWithdrawal,
+              paidChipsSinceLastWithdrawal: withdrawalAudit.paidChipsSinceLastWithdrawal,
+        freeChipsSinceLastWithdrawal: withdrawalAudit.freeChipsSinceLastWithdrawal,
+        paidGrantCountSinceLastWithdrawal: withdrawalAudit.paidGrantCountSinceLastWithdrawal,
+        freeGrantCountSinceLastWithdrawal: withdrawalAudit.freeGrantCountSinceLastWithdrawal,
+                  welcomeBonusSinceLastWithdrawal: withdrawalAudit.welcomeBonusSinceLastWithdrawal,
+        welcomeBonusCountSinceLastWithdrawal: withdrawalAudit.welcomeBonusCountSinceLastWithdrawal,
+        dailySpinChipsSinceLastWithdrawal: withdrawalAudit.dailySpinChipsSinceLastWithdrawal,
+        dailySpinCountSinceLastWithdrawal: withdrawalAudit.dailySpinCountSinceLastWithdrawal
         },
         results
     });
