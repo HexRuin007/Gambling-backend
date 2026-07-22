@@ -1436,7 +1436,57 @@ function buildPlayerGamblingAudit(playerId, limit = 20) {
         )
         .slice(0, safeLimit);
 }
+function getMaxBalanceSinceLastWithdrawal(playerId) {
+    const id = cleanPlayerId(playerId);
 
+    const transactions = state.chips.transactions
+        .filter(transaction => cleanPlayerId(transaction.playerId) === id)
+        .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+
+    let lastWithdrawalIndex = -1;
+
+    transactions.forEach((transaction, index) => {
+        if (transaction.type === "cashout") {
+            lastWithdrawalIndex = index;
+        }
+    });
+
+    const relevantTransactions =
+        lastWithdrawalIndex >= 0
+            ? transactions.slice(lastWithdrawalIndex + 1)
+            : transactions;
+
+    const lastWithdrawalAt =
+        lastWithdrawalIndex >= 0
+            ? transactions[lastWithdrawalIndex].createdAt
+            : null;
+
+    const lastWithdrawalAmount =
+        lastWithdrawalIndex >= 0
+            ? Math.abs(Number(transactions[lastWithdrawalIndex].amount || 0))
+            : null;
+
+    let maxBalance = 0;
+
+    for (const transaction of relevantTransactions) {
+        const balance = Number(transaction.balanceAfter || 0);
+        if (balance > maxBalance) {
+            maxBalance = balance;
+        }
+    }
+
+    const currentBalance = getChipBalance(id);
+    if (currentBalance > maxBalance) {
+        maxBalance = currentBalance;
+    }
+
+    return {
+        maxBalanceSinceLastWithdrawal: maxBalance,
+        lastWithdrawalAt,
+        lastWithdrawalAmount,
+        hadWithdrawal: lastWithdrawalIndex >= 0
+    };
+}
 function publicChipState() {
     return {
         balances: Object.fromEntries(
@@ -3612,45 +3662,32 @@ app.post("/chips/register-player", (req, res) => {
 app.get("/chips/player-audit", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
-    const playerId = cleanPlayerId(
-        req.query?.playerId
-    );
+    const playerId = cleanPlayerId(req.query?.playerId);
 
     if (!playerId) {
-        return res.status(400).json({
-            ok: false,
-            error: "Enter a player ID"
-        });
+        return res.status(400).json({ ok: false, error: "Enter a player ID" });
     }
 
     const playerExists =
-        Object.prototype.hasOwnProperty.call(
-            state.chips.balances,
-            playerId
-        ) ||
+        Object.prototype.hasOwnProperty.call(state.chips.balances, playerId) ||
         Boolean(state.chips.playerNames[playerId]);
 
     if (!playerExists) {
-        return res.status(404).json({
-            ok: false,
-            error: "Player was not found"
-        });
+        return res.status(404).json({ ok: false, error: "Player was not found" });
     }
 
-    const results = buildPlayerGamblingAudit(
-        playerId,
-        req.query?.limit || 20
-    );
-
+    const results = buildPlayerGamblingAudit(playerId, req.query?.limit || 20);
+    const withdrawalAudit = getMaxBalanceSinceLastWithdrawal(playerId); 
     res.json({
         ok: true,
         player: {
             playerId,
-            playerName:
-                state.chips.playerNames[playerId] ||
-                "Player",
-            currentBalance:
-                getChipBalance(playerId)
+            playerName: state.chips.playerNames[playerId] || "Player",
+            currentBalance: getChipBalance(playerId),
+            maxBalanceSinceLastWithdrawal: withdrawalAudit.maxBalanceSinceLastWithdrawal, 
+            lastWithdrawalAt: withdrawalAudit.lastWithdrawalAt,                           
+            lastWithdrawalAmount: withdrawalAudit.lastWithdrawalAmount,                   
+            hadWithdrawal: withdrawalAudit.hadWithdrawal                                  
         },
         results
     });
