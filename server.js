@@ -8,7 +8,7 @@ import path from "path";
 
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252"]);
+const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -4018,7 +4018,7 @@ app.post("/chips/request", (req, res) => {
             playerId,
             playerName,
             amount,
-            newbalance: displayBalance(playerId),
+            newBalance: displayBalance(playerId),
             source: "auto-approved-free-request",
             requestId: null,
             grantType: "free",
@@ -4169,7 +4169,7 @@ app.post("/chips/grant", (req, res) => {
         playerId,
         playerName,
         amount,
-        newbalance: displayBalance(playerId),
+        newBalance: displayBalance(playerId),
         source:
             request
                 ? "approved-request"
@@ -4382,7 +4382,7 @@ app.post("/chips/cashout", (req, res) => {
         playerName,
         amount,
         previousBalance: currentBalance,
-        newbalance: displayBalance(playerId)
+        newBalance: displayBalance(playerId)
     });
 
     res.json({
@@ -4392,6 +4392,117 @@ app.post("/chips/cashout", (req, res) => {
         amountRemoved: amount,
         previousBalance: currentBalance,
         balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/chips/withdrawal-approve", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const withdrawalRequestId = String(
+        req.body?.withdrawalRequestId || ""
+    ).trim();
+
+    const request = state.chips.withdrawalRequests.find(
+        item =>
+            item.withdrawalRequestId === withdrawalRequestId &&
+            item.status === "pending"
+    );
+
+    if (!request) {
+        return res.status(404).json({
+            ok: false,
+            error: "Withdrawal request not found or already handled"
+        });
+    }
+
+    const currentBalance = getChipBalance(request.playerId);
+
+    if (currentBalance < request.amount) {
+        return res.status(400).json({
+            ok: false,
+            error: `Player only has ${currentBalance} chips`
+        });
+    }
+
+    const removed = debitChips(
+        request.playerId,
+        request.amount,
+        {
+            playerName: request.playerName,
+            type: "cashout",
+            gameType: "",
+            note: "Withdrawal approved by banker in-app"
+        }
+    );
+
+    if (!removed.ok) {
+        return res.status(400).json({
+            ok: false,
+            error: removed.error
+        });
+    }
+
+    const requesterId = cleanPlayerId(req.body?.requesterId);
+
+    request.status = "completed";
+    request.completedAt = Date.now();
+    request.amountCompleted = request.amount;
+    request.handledBy =
+        state.chips.playerNames[requesterId] || "Banker";
+    request.handledByDiscordId = null;
+
+    addDiscordEvent("withdrawal-completed", {
+        withdrawalRequestId,
+        playerId: request.playerId,
+        playerName: request.playerName,
+        amount: request.amount,
+        previousBalance: currentBalance,
+        newBalance: displayBalance(request.playerId)
+    });
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        playerId: request.playerId,
+        amountRemoved: request.amount,
+        balance: displayBalance(request.playerId),
+        state: publicState()
+    });
+});
+
+app.post("/chips/withdrawal-deny", (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const withdrawalRequestId = String(
+        req.body?.withdrawalRequestId || ""
+    ).trim();
+
+    const request = state.chips.withdrawalRequests.find(
+        item =>
+            item.withdrawalRequestId === withdrawalRequestId &&
+            item.status === "pending"
+    );
+
+    if (!request) {
+        return res.status(404).json({
+            ok: false,
+            error: "Withdrawal request not found or already handled"
+        });
+    }
+
+    const requesterId = cleanPlayerId(req.body?.requesterId);
+
+    request.status = "denied";
+    request.deniedAt = Date.now();
+    request.handledBy =
+        state.chips.playerNames[requesterId] || "Banker";
+
+    queueChipSave();
+
+    res.json({
+        ok: true,
         state: publicState()
     });
 });
@@ -4409,6 +4520,7 @@ app.post("/chips/reject", (req, res) => {
             item.status === "pending"
     );
 
+
     if (!request) {
         return res.status(404).json({
             ok: false,
@@ -4420,6 +4532,14 @@ app.post("/chips/reject", (req, res) => {
         state.chips.requests.filter(
             item => item.requestId !== requestId
         );
+    addDiscordEvent("chip-request-denied", {
+    requestId,
+    playerId: request.playerId,
+    playerName: request.playerName,
+    amount: request.amount,
+    handledBy: "Banker (in-app)"
+});
+
 
     queueChipSave();
 
@@ -5018,6 +5138,14 @@ app.post(
             discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
+        addDiscordEvent("withdrawal-denied", {
+    withdrawalRequestId,
+    playerId: request.playerId,
+    playerName: request.playerName,
+    amount: request.amount,
+    handledBy: request.handledBy
+});
+
 
         queueChipSave();
 
