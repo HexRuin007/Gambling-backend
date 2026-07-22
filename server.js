@@ -56,16 +56,15 @@ const DAILY_SPIN_PRIZES = [
      oneTimeGlobal: true
     },
     
-    { id: "chips_10m", type: "chips", label: "10M Chips", amount: 10_000_000, weight: 32 },
-    { id: "chips_50m", type: "chips", label: "50M Chips", amount: 50_000_000, weight: 17 },
-    { id: "chips_100m", type: "chips", label: "100M Chips", amount: 100_000_000, weight: 12 },
-    { id: "chips_250m", type: "chips", label: "250M Chips", amount: 250_000_000, weight: 4 },
+   { id: "chips_10m",  type: "chips",   label: "10M Chips",  amount: 10_000_000,  weight: 30 },
+{ id: "chips_50m",  type: "chips",   label: "50M Chips",  amount: 50_000_000,  weight: 16 },
+{ id: "chips_100m", type: "chips",   label: "100M Chips", amount: 100_000_000, weight: 11 },
+{ id: "chips_250m", type: "chips",   label: "250M Chips", amount: 250_000_000, weight: 2 },
 
-   
-    { id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
-    { id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "25K x Random BXP", quantity: 1, weight: 1 },
+{ id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
+{ id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "25K x Random BXP", quantity: 1, weight: 3 },
 
-    { id: "nothing", type: "nothing", label: "Nothing", weight: 26 }
+{ id: "nothing", type: "nothing", label: "Nothing", weight: 34 }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
