@@ -2935,6 +2935,25 @@ const CHICKEN_RISKS = {
         survivalChance: 0.30
     }
 };
+const CHICKEN_GROWTH_FACTOR = 0.55;   
+const CHICKEN_MAX_MULTIPLIER = 50;    
+
+function chickenMultiplierForStep(step, riskKey) {
+    const risk = CHICKEN_RISKS[riskKey] || CHICKEN_RISKS.medium;
+    if (step <= 1) return 1;
+
+    const riskySteps = step - 1;
+    const fairMultiplier = 1 / Math.pow(risk.survivalChance, riskySteps);
+
+ 
+    const dampenedMultiplier = 1 + (fairMultiplier - 1) * CHICKEN_GROWTH_FACTOR;
+
+    const finalMultiplier = Math.min(
+        CHICKEN_MAX_MULTIPLIER,
+        dampenedMultiplier * CHICKEN_HOUSE_FACTOR
+    );
+
+   
 
 function ensureChickenState() {
     if (
