@@ -2952,6 +2952,8 @@ function chickenMultiplierForStep(step, riskKey) {
         CHICKEN_MAX_MULTIPLIER,
         dampenedMultiplier * CHICKEN_HOUSE_FACTOR
     );
+       return Math.max(1, Math.floor(finalMultiplier * 100) / 100);
+}
 
    
 
