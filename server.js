@@ -2938,22 +2938,6 @@ const CHICKEN_RISKS = {
 const CHICKEN_GROWTH_FACTOR = 0.55;   
 const CHICKEN_MAX_MULTIPLIER = 50;    
 
-function chickenMultiplierForStep(step, riskKey) {
-    const risk = CHICKEN_RISKS[riskKey] || CHICKEN_RISKS.medium;
-    if (step <= 1) return 1;
-
-    const riskySteps = step - 1;
-    const fairMultiplier = 1 / Math.pow(risk.survivalChance, riskySteps);
-
- 
-    const dampenedMultiplier = 1 + (fairMultiplier - 1) * CHICKEN_GROWTH_FACTOR;
-
-    const finalMultiplier = Math.min(
-        CHICKEN_MAX_MULTIPLIER,
-        dampenedMultiplier * CHICKEN_HOUSE_FACTOR
-    );
-       return Math.max(1, Math.floor(finalMultiplier * 100) / 100);
-}
 
    
 
@@ -2982,32 +2966,23 @@ function ensureChickenState() {
     return state.chicken;
 }
 
-function chickenMultiplierForStep(
-    step,
-    riskKey
-) {
-    const risk =
-        CHICKEN_RISKS[riskKey] ||
-        CHICKEN_RISKS.medium;
-
+function chickenMultiplierForStep(step, riskKey) {
+    const risk = CHICKEN_RISKS[riskKey] || CHICKEN_RISKS.medium;
     if (step <= 1) return 1;
 
-    const riskySteps =
-        step - 1;
+    const riskySteps = step - 1;
+    const fairMultiplier = 1 / Math.pow(risk.survivalChance, riskySteps);
 
-    return Math.max(
-        1,
-        Math.floor(
-            (
-                CHICKEN_HOUSE_FACTOR /
-                Math.pow(
-                    risk.survivalChance,
-                    riskySteps
-                )
-            ) * 100
-        ) / 100
+ 
+    const dampenedMultiplier = 1 + (fairMultiplier - 1) * CHICKEN_GROWTH_FACTOR;
+
+    const finalMultiplier = Math.min(
+        CHICKEN_MAX_MULTIPLIER,
+        dampenedMultiplier * CHICKEN_HOUSE_FACTOR
     );
+       return Math.max(1, Math.floor(finalMultiplier * 100) / 100);
 }
+
 
 function publicChickenGame(game) {
     if (!game) return null;
