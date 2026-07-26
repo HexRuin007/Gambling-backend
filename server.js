@@ -38,16 +38,16 @@ const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
 const SCRATCH_SYMBOLS = [
     { id: "blank",  label: "⬜", weight: 40, multiplier: 0   }, 
-    { id: "pear",   label: "🍐", weight: 25, multiplier: 2   },
-    { id: "cherry", label: "🍒", weight: 16, multiplier: 4   },
-    { id: "bell",   label: "🔔", weight: 10, multiplier: 8   },
-    { id: "gem",    label: "💎", weight: 6,  multiplier: 10  },
-    { id: "seven",  label: "7️⃣", weight: 2,  multiplier: 30 },
-    { id: "crown",  label: "👑", weight: 1,  multiplier: 50 }
+    { id: "pear",   label: "🍐", weight: 25, multiplier: 1  },
+    { id: "cherry", label: "🍒", weight: 16, multiplier: 2  },
+    { id: "bell",   label: "🔔", weight: 10, multiplier: 4.5  },
+    { id: "gem",    label: "💎", weight: 6,  multiplier: 6  },
+    { id: "seven",  label: "7️⃣", weight: 2,  multiplier: 7},
+    { id: "crown",  label: "👑", weight: 1,  multiplier: 8 }
 ];
 const SCRATCH_MAX_HISTORY = 100;
 const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
-const SCRATCH_PAYOUT_FACTOR = 0.80; 
+const SCRATCH_PAYOUT_FACTOR = 0.50; 
 
 
 const DAILY_SPIN_PRIZES = [
