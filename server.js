@@ -3814,6 +3814,7 @@ return res.json({
     batch,
     state: publicState()
 });
+    });
 
 app.post("/scratch/claim", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
