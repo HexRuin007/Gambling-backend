@@ -36,6 +36,17 @@ const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
+const SCRATCH_SYMBOLS = [
+    { id: "pear",   label: "🍐", weight: 35, multiplier: 1 },
+    { id: "cherry", label: "🍒", weight: 28, multiplier: 1.5 },
+    { id: "bell",   label: "🔔", weight: 18, multiplier: 3 },
+    { id: "gem",    label: "💎", weight: 12, multiplier: 8 },
+    { id: "seven",  label: "7️⃣", weight: 6,  multiplier: 20 },
+    { id: "crown",  label: "👑", weight: 1,  multiplier: 100 }
+];
+const SCRATCH_MAX_HISTORY = 100;
+const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
+const SCRATCH_PAYOUT_FACTOR = 0.92; 
 
 
 const DAILY_SPIN_PRIZES = [
@@ -128,6 +139,9 @@ const state = {
         freeSpins: {},
         lastPaidBet: {}
     },
+    scratch: {
+    history: []
+},
 
     mines: {
         games: {},
@@ -248,6 +262,11 @@ function loadChipData() {
             state.chips.transactions =
                 saved.transactions.slice(0, 5000);
         }
+        if (saved.scratch && typeof saved.scratch === "object") {
+    if (Array.isArray(saved.scratch.history)) {
+        state.scratch.history = saved.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+    }
+}
 
         if (
             Number.isFinite(
@@ -435,6 +454,9 @@ function saveChipDataImmediately() {
                 freeSpins: state.slots.freeSpins,
                 lastPaidBet: state.slots.lastPaidBet
             },
+            scratch: {
+    history: state.scratch.history
+},
             mines: {
                 games: state.mines.games,
                 history: state.mines.history
@@ -522,7 +544,49 @@ function normaliseFundingBreakdown(breakdown, totalAmount) {
 
     return { real: real + missing, promo };
 }
+function pickScratchSymbol() {
+    const total = SCRATCH_SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
+    let roll = crypto.randomInt(1, total + 1);
+    for (const symbol of SCRATCH_SYMBOLS) {
+        roll -= symbol.weight;
+        if (roll <= 0) return symbol.id;
+    }
+    return "pear";
+}
 
+function createScratchCard() {
+    return Array.from({ length: 9 }, () => pickScratchSymbol());
+}
+
+function evaluateScratchCard(cells, ticketPrice) {
+    const counts = {};
+    for (const symbol of cells) counts[symbol] = (counts[symbol] || 0) + 1;
+
+    let bestSymbol = null;
+    let bestMultiplier = 0;
+
+    for (const [symbolId, count] of Object.entries(counts)) {
+        if (count < 3) continue;
+        const def = SCRATCH_SYMBOLS.find(s => s.id === symbolId);
+        if (def && def.multiplier > bestMultiplier) {
+            bestMultiplier = def.multiplier;
+            bestSymbol = symbolId;
+        }
+    }
+
+    const payout = bestMultiplier > 0
+        ? Math.floor(ticketPrice * bestMultiplier * SCRATCH_PAYOUT_FACTOR)
+        : 0;
+
+    return { cells, winningSymbol: bestSymbol, multiplier: bestMultiplier, payout };
+}
+
+function publicScratchState() {
+    return {
+        symbols: SCRATCH_SYMBOLS.map(s => ({ id: s.id, label: s.label, multiplier: s.multiplier })),
+        history: state.scratch.history.slice(0, 50).map(entry => ({ ...entry }))
+    };
+}
 function recordHouseMovement({
     amount,
     movement,
@@ -3655,6 +3719,79 @@ app.post("/chips/blacklist/remove", (req, res) => {
         ok: true,
         removed: existed,
         playerId,
+        state: publicState()
+    });
+});
+
+app.post("/scratch/buy", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    const ticketPrice = cleanAmount(req.body?.ticketPrice);
+    const quantity = Math.floor(Number(req.body?.quantity || 1));
+
+    if (!playerId || !playerName || !ticketPrice) {
+        return res.status(400).json({ ok: false, error: "Invalid scratch ticket purchase" });
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > SCRATCH_MAX_TICKETS_PER_PURCHASE) {
+        return res.status(400).json({
+            ok: false,
+            error: `Choose between 1 and ${SCRATCH_MAX_TICKETS_PER_PURCHASE} tickets`
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const totalCost = ticketPrice * quantity;
+
+    const debit = debitChips(playerId, totalCost, {
+        playerName,
+        type: "bet",
+        gameType: "scratch",
+        note: `Bought ${quantity} scratch ticket(s) at ${ticketPrice} each`
+    });
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    const tickets = Array.from({ length: quantity }, () =>
+        evaluateScratchCard(createScratchCard(), ticketPrice)
+    );
+
+    const totalPayout = tickets.reduce((sum, t) => sum + t.payout, 0);
+
+    if (totalPayout > 0) {
+        creditChips(playerId, totalPayout, {
+            playerName,
+            type: "payout",
+            gameType: "scratch",
+            note: `Scratch ticket winnings (${quantity} ticket(s))`
+        });
+    }
+
+    const batch = {
+        batchId: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        ticketPrice,
+        quantity,
+        totalCost,
+        totalPayout,
+        profit: totalPayout - totalCost,
+        winningTickets: tickets.filter(t => t.payout > 0).length,
+        createdAt: Date.now()
+    };
+
+    state.scratch.history.unshift(batch);
+    state.scratch.history = state.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        tickets,
+        batch,
+        balance: displayBalance(playerId),
         state: publicState()
     });
 });
