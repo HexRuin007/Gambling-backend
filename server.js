@@ -560,7 +560,9 @@ function createScratchCard() {
 
 function evaluateScratchCard(cells, ticketPrice) {
     const counts = {};
-    for (const symbol of cells) counts[symbol] = (counts[symbol] || 0) + 1;
+    for (const symbolId of cells) {
+        counts[symbolId] = (counts[symbolId] || 0) + 1;
+    }
 
     let bestSymbol = null;
     let bestMultiplier = 0;
@@ -574,11 +576,18 @@ function evaluateScratchCard(cells, ticketPrice) {
         }
     }
 
-    const payout = bestMultiplier > 0
+    const rawPayout = bestMultiplier > 0
         ? Math.floor(ticketPrice * bestMultiplier * SCRATCH_PAYOUT_FACTOR)
         : 0;
 
-    return { cells, winningSymbol: bestSymbol, multiplier: bestMultiplier, payout };
+    return {
+        cells,
+        winningSymbol: bestSymbol,
+        multiplier: bestMultiplier,
+        payout: rawPayout,
+        isWin: rawPayout > ticketPrice,   
+        isLoss: rawPayout === 0
+    };
 }
 
 function publicScratchState() {
@@ -3769,6 +3778,9 @@ app.post("/scratch/buy", (req, res) => {
             note: `Scratch ticket winnings (${quantity} ticket(s))`
         });
     }
+     const tickets = Array.from({ length: quantity }, () =>
+        evaluateScratchCard(createScratchCard(), ticketPrice)
+    );
 
     const batch = {
         batchId: crypto.randomBytes(8).toString("hex"),
