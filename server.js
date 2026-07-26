@@ -37,7 +37,7 @@ const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
 const SCRATCH_SYMBOLS = [
-    { id: "blank",  label: "⬜", weight: 40, multiplier: 0   }, 
+    { id: "blank",  label: "🖕", weight: 40, multiplier: 0   }, 
     { id: "pear",   label: "🍐", weight: 25, multiplier: 1.5 },
     { id: "cherry", label: "🍒", weight: 16, multiplier: 2.5  },
     { id: "bell",   label: "🔔", weight: 10, multiplier: 4.5  },
