@@ -582,6 +582,7 @@ function evaluateScratchCard(cells, ticketPrice) {
 
     return {
         cells,
+        ticketPrice,
         winningSymbol: bestSymbol,
         multiplier: bestMultiplier,
         payout: rawPayout,
