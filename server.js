@@ -37,12 +37,12 @@ const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
 const SCRATCH_SYMBOLS = [
-    { id: "pear",   label: "🍐", weight: 30, multiplier: 3   },
-    { id: "cherry", label: "🍒", weight: 22, multiplier: 5   },
-    { id: "bell",   label: "🔔", weight: 18, multiplier: 8   },
-    { id: "gem",    label: "💎", weight: 15, multiplier: 15  },
-    { id: "seven",  label: "7️⃣", weight: 10, multiplier: 40  },
-    { id: "crown",  label: "👑", weight: 5,  multiplier: 150 }
+    { id: "pear",   label: "🍐", weight: 30, multiplier: 1   },
+    { id: "cherry", label: "🍒", weight: 22, multiplier: 3   },
+    { id: "bell",   label: "🔔", weight: 18, multiplier: 5   },
+    { id: "gem",    label: "💎", weight: 15, multiplier: 8  },
+    { id: "seven",  label: "7️⃣", weight: 10, multiplier: 20  },
+    { id: "crown",  label: "👑", weight: 5,  multiplier: 50 }
 ];
 const SCRATCH_MAX_HISTORY = 100;
 const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
