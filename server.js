@@ -3829,7 +3829,6 @@ app.post("/scratch/buy", (req, res) => {
         balance: displayBalance(playerId),
         state: publicState()
     });
-});
 
 
 app.post("/chips/register-player", (req, res) => {
