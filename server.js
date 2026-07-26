@@ -140,8 +140,9 @@ const state = {
         freeSpins: {},
         lastPaidBet: {}
     },
-    scratch: {
-    history: []
+ scratch: {
+    history: [],
+    pending: {}
 },
 
     mines: {
@@ -263,12 +264,17 @@ function loadChipData() {
             state.chips.transactions =
                 saved.transactions.slice(0, 5000);
         }
-        if (saved.scratch && typeof saved.scratch === "object") {
+  if (saved.scratch && typeof saved.scratch === "object") {
     if (Array.isArray(saved.scratch.history)) {
-        state.scratch.history = saved.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+        state.scratch.history =
+            saved.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+    }
+
+    if (saved.scratch.pending &&
+        typeof saved.scratch.pending === "object") {
+        state.scratch.pending = saved.scratch.pending;
     }
 }
-
         if (
             Number.isFinite(
                 Number(saved.grantTypeTrackingStartedAt)
@@ -455,8 +461,9 @@ function saveChipDataImmediately() {
                 freeSpins: state.slots.freeSpins,
                 lastPaidBet: state.slots.lastPaidBet
             },
-            scratch: {
-    history: state.scratch.history
+   scratch: {
+    history: state.scratch.history,
+    pending: state.scratch.pending
 },
             mines: {
                 games: state.mines.games,
@@ -596,7 +603,11 @@ function evaluateScratchCard(cells, ticketPrice) {
 
 function publicScratchState() {
     return {
-        symbols: SCRATCH_SYMBOLS.map(s => ({ id: s.id, label: s.label, multiplier: s.multiplier })),
+        symbols: SCRATCH_SYMBOLS.map(s => ({
+            id: s.id,
+            label: s.label,
+            multiplier: s.multiplier
+        })),
         history: state.scratch.history.slice(0, 50).map(entry => ({ ...entry }))
     };
 }
@@ -3772,16 +3783,37 @@ app.post("/scratch/buy", (req, res) => {
         evaluateScratchCard(createScratchCard(), ticketPrice)
     );
 
-    const totalPayout = tickets.reduce((sum, t) => sum + t.payout, 0);
+const totalPayout = tickets.reduce((sum, t) => sum + t.payout, 0);
+const winningTickets = tickets.filter(t => t.payout > 0).length;
 
-    if (totalPayout > 0) {
-        creditChips(playerId, totalPayout, {
-            playerName,
-            type: "payout",
-            gameType: "scratch",
-            note: `Scratch ticket winnings (${quantity} ticket(s))`
-        });
-    }
+const batch = {
+    id: crypto.randomBytes(8).toString("hex"),
+    playerId,
+    playerName,
+    ticketPrice,
+    quantity,
+    totalCost,
+    totalPayout,
+    winningTickets,
+    profit: totalPayout - totalCost,
+    claimed: false,
+    createdAt: Date.now()
+};
+
+state.scratch.pending ||= {};
+state.scratch.pending[playerId] = {
+    batch,
+    tickets
+};
+
+queueChipSave();
+
+return res.json({
+    ok: true,
+    tickets,
+    batch,
+    state: publicState()
+});
 
     const batch = {
         batchId: crypto.randomBytes(8).toString("hex"),
@@ -3809,7 +3841,64 @@ app.post("/scratch/buy", (req, res) => {
         state: publicState()
     });
 });
+app.post("/scratch/claim", (req, res) => {
+    const playerId = cleanPlayerId(req.body?.playerId);
 
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid player"
+        });
+    }
+
+    const pending = state.scratch.pending?.[playerId];
+
+    if (!pending) {
+        return res.status(400).json({
+            ok: false,
+            error: "No scratch tickets to claim"
+        });
+    }
+
+    const { batch } = pending;
+
+    if (!batch.claimed && batch.totalPayout > 0) {
+        creditChips(playerId, batch.totalPayout, {
+            playerName: batch.playerName,
+            type: "payout",
+            gameType: "scratch",
+            note: "Scratch ticket winnings"
+        });
+    }
+
+    batch.claimed = true;
+
+    state.scratch.history.unshift({
+        playerId: batch.playerId,
+        playerName: batch.playerName,
+        quantity: batch.quantity,
+        ticketPrice: batch.ticketPrice,
+        totalCost: batch.totalCost,
+        totalPayout: batch.totalPayout,
+        winningTickets: batch.winningTickets,
+        profit: batch.profit,
+        createdAt: batch.createdAt
+    });
+
+    state.scratch.history =
+        state.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+
+    delete state.scratch.pending[playerId];
+
+    queueChipSave();
+
+    return res.json({
+        ok: true,
+        batch,
+        balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
 
 app.post("/chips/register-player", (req, res) => {
     const playerId = cleanPlayerId(
