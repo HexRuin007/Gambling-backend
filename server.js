@@ -3278,6 +3278,8 @@ function publicState() {
         deal: publicDealState(),
         roulette: publicRouletteState(),
         chicken: publicChickenState(),
+        scratch:{ history: state.scratch.history
+},
         dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
@@ -3860,8 +3862,11 @@ app.post("/scratch/claim", (req, res) => {
         createdAt: batch.createdAt
     });
 
-    state.scratch.history =
-        state.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
+
+
+if (state.scratch.history.length > SCRATCH_MAX_HISTORY) {
+    state.scratch.history.length = SCRATCH_MAX_HISTORY;
+}
 
     delete state.scratch.pending[playerId];
 
