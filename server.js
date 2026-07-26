@@ -3815,32 +3815,6 @@ return res.json({
     state: publicState()
 });
 
-    const batch = {
-        batchId: crypto.randomBytes(8).toString("hex"),
-        playerId,
-        playerName,
-        ticketPrice,
-        quantity,
-        totalCost,
-        totalPayout,
-        profit: totalPayout - totalCost,
-        winningTickets: tickets.filter(t => t.isWin).length,
-        losingTickets: tickets.filter(t => !t.isWin).length,
-        createdAt: Date.now()
-    };
-
-    state.scratch.history.unshift(batch);
-    state.scratch.history = state.scratch.history.slice(0, SCRATCH_MAX_HISTORY);
-    queueChipSave();
-
-    res.json({
-        ok: true,
-        tickets,
-        batch,
-        balance: displayBalance(playerId),
-        state: publicState()
-    });
-});
 app.post("/scratch/claim", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
 
