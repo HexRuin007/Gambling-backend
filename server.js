@@ -2924,15 +2924,15 @@ const CHICKEN_MAX_HISTORY = 50;
 const CHICKEN_RISKS = {
     easy: {
         label: "Easy",
-        survivalChance: 0.75
+        survivalChance: 0.80    
     },
     medium: {
         label: "Medium",
-        survivalChance: 0.50
+        survivalChance: 0.60
     },
     hard: {
         label: "Hard",
-        survivalChance: 0.30
+        survivalChance: 0.40
     }
 };
 const CHICKEN_GROWTH_FACTOR = 0.55;   
