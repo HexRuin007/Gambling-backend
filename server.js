@@ -37,12 +37,13 @@ const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
 const SCRATCH_SYMBOLS = [
-    { id: "pear",   label: "🍐", weight: 30, multiplier: 1   },
-    { id: "cherry", label: "🍒", weight: 22, multiplier: 3   },
-    { id: "bell",   label: "🔔", weight: 18, multiplier: 5   },
-    { id: "gem",    label: "💎", weight: 15, multiplier: 8  },
-    { id: "seven",  label: "7️⃣", weight: 10, multiplier: 20  },
-    { id: "crown",  label: "👑", weight: 5,  multiplier: 50 }
+    { id: "blank",  label: "⬜", weight: 40, multiplier: 0   }, 
+    { id: "pear",   label: "🍐", weight: 25, multiplier: 2   },
+    { id: "cherry", label: "🍒", weight: 16, multiplier: 4   },
+    { id: "bell",   label: "🔔", weight: 10, multiplier: 8   },
+    { id: "gem",    label: "💎", weight: 6,  multiplier: 10  },
+    { id: "seven",  label: "7️⃣", weight: 2,  multiplier: 30 },
+    { id: "crown",  label: "👑", weight: 1,  multiplier: 50 }
 ];
 const SCRATCH_MAX_HISTORY = 100;
 const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
@@ -568,7 +569,9 @@ function evaluateScratchCard(cells, ticketPrice) {
     let bestMultiplier = 0;
 
     for (const [symbolId, count] of Object.entries(counts)) {
+        if (symbolId === "blank") continue;   
         if (count < 3) continue;
+
         const def = SCRATCH_SYMBOLS.find(s => s.id === symbolId);
         if (def && def.multiplier > bestMultiplier) {
             bestMultiplier = def.multiplier;
@@ -586,7 +589,7 @@ function evaluateScratchCard(cells, ticketPrice) {
         winningSymbol: bestSymbol,
         multiplier: bestMultiplier,
         payout: rawPayout,
-        isWin: rawPayout > ticketPrice,   
+        isWin: rawPayout > ticketPrice,
         isLoss: rawPayout === 0
     };
 }
