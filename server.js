@@ -49,11 +49,6 @@ const SCRATCH_SYMBOLS = [
 const SCRATCH_MAX_HISTORY = 100;
 const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
 const SCRATCH_PAYOUT_FACTOR = 0.70; 
-const freeBet = useFreeBet(playerId, "horseFreeBets");
-
-if (freeBet.ok) {
-    const betAmount = freeBet.amount;
-}
 
 
 const DAILY_SPIN_PRIZES = [
