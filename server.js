@@ -36,6 +36,7 @@ const DEAL_MAX_HISTORY = 100;
 const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
+const FREE_BET_FIXED_AMOUNT = 10_000_000;
 const SCRATCH_SYMBOLS = [
     { id: "blank",  label: "🖕", weight: 40, multiplier: 0   }, 
     { id: "pear",   label: "🍐", weight: 25, multiplier: 1.5 },
@@ -51,6 +52,7 @@ const SCRATCH_PAYOUT_FACTOR = 0.70;
 
 
 const DAILY_SPIN_PRIZES = [
+   
     {
         id: "mk15",
         type: "item",
@@ -59,24 +61,92 @@ const DAILY_SPIN_PRIZES = [
         quantity: 1,
         oneTimeGlobal: true
     },
-
-    { id: "grinder",
+    {
+        id: "grinder",
         type: "item",
-            label: "GrinderKnife",
-            itemName: "GrinderKnife",
-     quantity: 1,
-     oneTimeGlobal: true
+        label: "Grinder Knife",
+        itemName: "GrinderKnife",
+        quantity: 1,
+        oneTimeGlobal: true
     },
+
+   
+    {
+        id: "bxp10k",
+        type: "item",
+        label: "10K Random BXP",
+        itemName: "10K x Random BXP",
+        quantity: 1,
+        weight: 10
+    },
+    {
+        id: "bxp25k",
+        type: "item",
+        label: "25K Random BXP",
+        itemName: "25K x Random BXP",
+        quantity: 1,
+        weight: 4
+    },
+
     
-   { id: "chips_10m",  type: "chips",   label: "10M Chips",  amount: 10_000_000,  weight: 30 },
-{ id: "chips_50m",  type: "chips",   label: "50M Chips",  amount: 50_000_000,  weight: 16 },
-{ id: "chips_100m", type: "chips",   label: "100M Chips", amount: 100_000_000, weight: 11 },
-{ id: "chips_250m", type: "chips",   label: "250M Chips", amount: 250_000_000, weight: 2 },
+    {
+        id: "scratch1",
+        type: "scratch_ticket",
+        label: "1 Scratch Ticket",
+        amount: 1,
+        weight: 25
+    },
+    {
+        id: "scratch3",
+        type: "scratch_ticket",
+        label: "3 Scratch Tickets",
+        amount: 3,
+        weight: 12
+    },
+    {
+        id: "scratch5",
+        type: "scratch_ticket",
+        label: "5 Scratch Tickets",
+        amount: 5,
+        weight: 5
+    },
 
-{ id: "10K x Random BXP", type: "item", label: "10K x RandomBXP", itemName: "10K x Random BXP", quantity: 1, weight: 4 },
-{ id: "25K x Random BXP", type: "item", label: "25K x RandomBXP", itemName: "25K x Random BXP", quantity: 1, weight: 3 },
+    {
+        id: "horse1",
+        type: "horse_free_bet",
+        label: "1 Free Horse Race Bet",
+        amount: 1,
+        weight: 16
+    },
+    {
+        id: "horse3",
+        type: "horse_free_bet",
+        label: "3 Free Horse Race Bets",
+        amount: 3,
+        weight: 5
+    },
 
-{ id: "nothing", type: "nothing", label: "Nothing", weight: 34 }
+    {
+        id: "blackjack1",
+        type: "blackjack_free_bet",
+        label: "1 Free Blackjack Bet",
+        amount: 1,
+        weight: 16
+    },
+    {
+        id: "blackjack3",
+        type: "blackjack_free_bet",
+        label: "3 Free Blackjack Bets",
+        amount: 3,
+        weight: 5
+    },
+
+    {
+        id: "nothing",
+        type: "nothing",
+        label: "Nothing",
+        weight: 22
+    }
 ];
 
 const DEAL_OFFER_BASE_FACTOR = 0.82;
@@ -120,6 +190,7 @@ const wheel = [
 ];
 
 const state = {
+      dailyRewards: {},
     chips: {
         balances: {},
         playerNames: {},
@@ -245,6 +316,11 @@ function loadChipData() {
         ) {
             state.chips.playerNames = saved.playerNames;
         }
+        if (saved.dailyRewards && typeof saved.dailyRewards === "object") {
+         state.dailyRewards = saved.dailyRewards;
+        } else {
+        state.dailyRewards = {};
+       }
 
         if (Array.isArray(saved.requests)) {
             state.chips.requests = saved.requests;
@@ -443,6 +519,7 @@ function saveChipDataImmediately() {
         const data = {
             balances: state.chips.balances,
             playerNames: state.chips.playerNames,
+            dailyRewards: state.dailyRewards,
             requests: state.chips.requests,
             withdrawalRequests:
                 state.chips.withdrawalRequests,
@@ -1893,6 +1970,27 @@ function publicSlotsState() {
         paylines: SLOT_PAYLINES.length
     };
 }
+function getPlayerRewards(playerId) {
+    const id = cleanPlayerId(playerId);
+
+    if (!state.dailyRewards) {
+        state.dailyRewards = {};
+    }
+
+    if (!state.dailyRewards[id]) {
+        state.dailyRewards[id] = {
+            scratchTickets: 0,
+            horseFreeBets: 0,
+            blackjackFreeBets: 0,
+            slotFreeSpins: 0,
+            minesFreeGames: 0,
+            rouletteFreeBets: 0,
+            chickenFreeRuns: 0
+        };
+    }
+
+    return state.dailyRewards[id];
+}
 
 
 
@@ -3276,6 +3374,7 @@ function publicState() {
         slots: publicSlotsState(),
         mines: publicMinesState(),
         deal: publicDealState(),
+        rewards: publicRewardsState(),
         roulette: publicRouletteState(),
         chicken: publicChickenState(),
         scratch:{ history: state.scratch.history
@@ -3285,6 +3384,10 @@ function publicState() {
         blackjack: publicBlackjackState(),
         racing: publicRacingState()
     };
+}
+function publicRewardsState() {
+
+    return state.dailyRewards;
 }
 
 function finishWheelSpin(spinId) {
@@ -3749,11 +3852,12 @@ app.post("/chips/blacklist/remove", (req, res) => {
     });
 });
 
+js
 app.post("/scratch/buy", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
     const playerName = cleanPlayerName(req.body?.playerName);
-    const ticketPrice = cleanAmount(req.body?.ticketPrice);
-    const quantity = Math.floor(Number(req.body?.quantity || 1));
+    let ticketPrice = cleanAmount(req.body?.ticketPrice);
+    let quantity = Math.floor(Number(req.body?.quantity || 1));
 
     if (!playerId || !playerName || !ticketPrice) {
         return res.status(400).json({ ok: false, error: "Invalid scratch ticket purchase" });
@@ -3768,55 +3872,71 @@ app.post("/scratch/buy", (req, res) => {
 
     rememberPlayer(playerId, playerName);
 
-    const totalCost = ticketPrice * quantity;
+    const rewards = getPlayerRewards(playerId);
 
-    const debit = debitChips(playerId, totalCost, {
-        playerName,
-        type: "bet",
-        gameType: "scratch",
-        note: `Bought ${quantity} scratch ticket(s) at ${ticketPrice} each`
-    });
+    let usingFreeTicket = false;
 
-    if (!debit.ok) {
-        return res.status(400).json(debit);
+    if (rewards.scratchTickets > 0) {
+        // Free ticket: ignore whatever price/quantity the client sent.
+        // Always exactly 1 ticket at the fixed free-bet value.
+        rewards.scratchTickets--;
+        usingFreeTicket = true;
+        ticketPrice = FREE_BET_FIXED_AMOUNT;
+        quantity = 1;
+        queueChipSave();
+    } else {
+        const totalCost = ticketPrice * quantity;
+
+        const debit = debitChips(playerId, totalCost, {
+            playerName,
+            type: "bet",
+            gameType: "scratch"
+        });
+
+        if (!debit.ok) {
+            return res.json(debit);
+        }
     }
+
+    const totalCost = ticketPrice * quantity;
 
     const tickets = Array.from({ length: quantity }, () =>
         evaluateScratchCard(createScratchCard(), ticketPrice)
     );
 
-const totalPayout = tickets.reduce((sum, t) => sum + t.payout, 0);
-const winningTickets = tickets.filter(t => t.payout > 0).length;
+    const totalPayout = tickets.reduce((sum, t) => sum + t.payout, 0);
+    const winningTickets = tickets.filter(t => t.payout > 0).length;
 
-const batch = {
-    id: crypto.randomBytes(8).toString("hex"),
-    playerId,
-    playerName,
-    ticketPrice,
-    quantity,
-    totalCost,
-    totalPayout,
-    winningTickets,
-    profit: totalPayout - totalCost,
-    claimed: false,
-    createdAt: Date.now()
-};
+    const batch = {
+        id: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        ticketPrice,
+        quantity,
+        totalCost: usingFreeTicket ? 0 : totalCost,
+        totalPayout,
+        winningTickets,
+        profit: totalPayout - (usingFreeTicket ? 0 : totalCost),
+        free: usingFreeTicket,
+        claimed: false,
+        createdAt: Date.now()
+    };
 
-state.scratch.pending ||= {};
-state.scratch.pending[playerId] = {
-    batch,
-    tickets
-};
+    state.scratch.pending ||= {};
+    state.scratch.pending[playerId] = {
+        batch,
+        tickets
+    };
 
-queueChipSave();
+    queueChipSave();
 
-return res.json({
-    ok: true,
-    tickets,
-    batch,
-    state: publicState()
-});
+    return res.json({
+        ok: true,
+        tickets,
+        batch,
+        state: publicState()
     });
+});
 
 app.post("/scratch/claim", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
@@ -4873,32 +4993,36 @@ app.post("/daily-spin/spin", (req, res) => {
     const prize = pickDailySpinPrize();
     const spinId = crypto.randomBytes(8).toString("hex");
     const createdAt = Date.now();
-    let deliveryId = null;
+ let deliveryId = null;
 
-    if (prize.oneTimeGlobal) {
-      
-        state.dailySpin.oneTimeClaims[prize.id] = {
-            prizeId: prize.id,
-            prizeLabel: prize.label,
-            spinId,
-            playerId,
-            playerName,
-            claimedAt: createdAt
-        };
-        saveChipDataImmediately();
-    }
+if (prize.oneTimeGlobal) {
 
-    if (prize.type === "chips") {
-        const amount = cleanAmount(prize.amount);
-        if (!amount || !creditChips(playerId, amount, {
+    state.dailySpin.oneTimeClaims[prize.id] = {
+        prizeId: prize.id,
+        prizeLabel: prize.label,
+        spinId,
+        playerId,
+        playerName,
+        claimedAt: createdAt
+    };
+
+    saveChipDataImmediately();
+}
+
+switch (prize.type) {
+
+    case "chips":
+
+        creditChips(playerId, prize.amount, {
             playerName,
             type: "daily-spin-prize",
-            gameType: "daily-spin",
-            note: `Daily spin prize: ${prize.label}`
-        })) {
-            return res.status(500).json({ ok: false, error: "Could not credit daily-spin chips" });
-        }
-    } else if (prize.type === "item") {
+            note: prize.label
+        });
+
+        break;
+
+    case "item":
+
         deliveryId = crypto.randomBytes(8).toString("hex");
 
         state.dailySpin.deliveries[deliveryId] = {
@@ -4924,7 +5048,21 @@ app.post("/daily-spin/spin", (req, res) => {
             prizeLabel: prize.label,
             quantity: Math.max(1, Math.floor(Number(prize.quantity || 1)))
         });
-    }
+
+        break;
+
+    case "scratch_ticket":
+    case "horse_free_bet":
+    case "blackjack_free_bet":
+    case "slot_free_spin":
+    case "mines_free_game":
+    case "roulette_free_bet":
+    case "chicken_free_run":
+
+        giveReward(playerId, prize);
+
+        break;
+}
 
     const result = {
         spinId,
@@ -6174,7 +6312,43 @@ app.post("/deal/reject", (req, res) => {
     });
 });
 
+function giveReward(playerId, prize) {
 
+    const rewards = getPlayerRewards(playerId);
+
+    switch (prize.type) {
+
+        case "scratch_ticket":
+            rewards.scratchTickets += prize.amount;
+            break;
+
+        case "horse_free_bet":
+            rewards.horseFreeBets += prize.amount;
+            break;
+
+        case "blackjack_free_bet":
+            rewards.blackjackFreeBets += prize.amount;
+            break;
+
+        case "slot_free_spin":
+            rewards.slotFreeSpins += prize.amount;
+            break;
+
+        case "mines_free_game":
+            rewards.minesFreeGames += prize.amount;
+            break;
+
+        case "roulette_free_bet":
+            rewards.rouletteFreeBets += prize.amount;
+            break;
+
+        case "chicken_free_run":
+            rewards.chickenFreeRuns += prize.amount;
+            break;
+    }
+
+    queueChipSave();
+}
 
 app.post("/mines/start", (req, res) => {
     const playerId = cleanPlayerId(
@@ -6650,17 +6824,9 @@ app.post("/blackjack/place-bet", (req, res) => {
         });
     }
 
-    const playerId = cleanPlayerId(
-        req.body?.playerId
-    );
-
-    const playerName = cleanPlayerName(
-        req.body?.playerName
-    );
-
-    const amount = cleanAmount(
-        req.body?.amount
-    );
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    let amount = cleanAmount(req.body?.amount);
 
     if (!playerId || !playerName || !amount) {
         return res.status(400).json({
@@ -6684,6 +6850,13 @@ app.post("/blackjack/place-bet", (req, res) => {
     );
 
     if (existing) {
+        if (existing.free) {
+            return res.status(400).json({
+                ok: false,
+                error: "Free bets can't be adjusted"
+            });
+        }
+
         const reserved = replaceReservedBet(
             existing,
             amount,
@@ -6704,28 +6877,39 @@ app.post("/blackjack/place-bet", (req, res) => {
         existing.confirmed = true;
         existing.updatedAt = Date.now();
     } else {
-        const reserved = debitChips(
-            playerId,
-            amount,
-            {
-                playerName,
-                type: "bet",
-                gameType: "blackjack",
-                note: "Blackjack bet placed"
-            }
-        );
+        const rewards = getPlayerRewards(playerId);
+        let usingFreeBet = false;
 
-        if (!reserved.ok) {
-            return res.status(400).json({
-                ok: false,
-                error: reserved.error
-            });
+        if (rewards.blackjackFreeBets > 0) {
+            rewards.blackjackFreeBets--;
+            amount = FREE_BET_FIXED_AMOUNT;
+            usingFreeBet = true;
+            queueChipSave();
+        } else {
+            const reserved = debitChips(
+                playerId,
+                amount,
+                {
+                    playerName,
+                    type: "bet",
+                    gameType: "blackjack",
+                    note: "Blackjack bet placed"
+                }
+            );
+
+            if (!reserved.ok) {
+                return res.status(400).json({
+                    ok: false,
+                    error: reserved.error
+                });
+            }
         }
 
         bj.bets.push({
             playerId,
             playerName,
             amount,
+            free: usingFreeBet,
             confirmed: true,
             createdAt: Date.now()
         });
@@ -6851,21 +7035,10 @@ app.post("/racing/place-bet", (req, res) => {
         });
     }
 
-    const playerId = cleanPlayerId(
-        req.body?.playerId
-    );
-
-    const playerName = cleanPlayerName(
-        req.body?.playerName
-    );
-
-    const amount = cleanAmount(
-        req.body?.amount
-    );
-
-    const horseId = String(
-        req.body?.horseId || ""
-    );
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    let amount = cleanAmount(req.body?.amount);
+    const horseId = String(req.body?.horseId || "");
 
     const horse = race.horses.find(
         item => item.id === horseId
@@ -6892,6 +7065,13 @@ app.post("/racing/place-bet", (req, res) => {
     );
 
     if (existing) {
+        if (existing.free) {
+            return res.status(400).json({
+                ok: false,
+                error: "Free bets can't be adjusted"
+            });
+        }
+
         const reserved = replaceReservedBet(
             existing,
             amount,
@@ -6913,23 +7093,38 @@ app.post("/racing/place-bet", (req, res) => {
         existing.horseName = horse.name;
         existing.confirmed = true;
         existing.updatedAt = Date.now();
-    } else {
-        const reserved = debitChips(
-            playerId,
-            amount,
-            {
-                playerName,
-                type: "bet",
-                gameType: "racing",
-                note: `Horse racing bet on ${horse.name}`
-            }
-        );
 
-        if (!reserved.ok) {
-            return res.status(400).json({
-                ok: false,
-                error: reserved.error
-            });
+    } else {
+
+        const rewards = getPlayerRewards(playerId);
+        let usingFreeBet = false;
+
+        if (rewards.horseFreeBets > 0) {
+
+            rewards.horseFreeBets--;
+            amount = FREE_BET_FIXED_AMOUNT;
+            usingFreeBet = true;
+            queueChipSave();
+
+        } else {
+
+            const reserved = debitChips(
+                playerId,
+                amount,
+                {
+                    playerName,
+                    type: "bet",
+                    gameType: "racing",
+                    note: `Horse racing bet on ${horse.name}`
+                }
+            );
+
+            if (!reserved.ok) {
+                return res.status(400).json({
+                    ok: false,
+                    error: reserved.error
+                });
+            }
         }
 
         race.bets.push({
@@ -6938,6 +7133,7 @@ app.post("/racing/place-bet", (req, res) => {
             amount,
             horseId: horse.id,
             horseName: horse.name,
+            free: usingFreeBet,
             confirmed: true,
             createdAt: Date.now()
         });
@@ -6951,7 +7147,6 @@ app.post("/racing/place-bet", (req, res) => {
         state: publicState()
     });
 });
-
 
 
 app.post("/racing/confirm-all", (req, res) => {
