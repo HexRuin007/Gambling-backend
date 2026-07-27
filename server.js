@@ -3852,7 +3852,7 @@ app.post("/chips/blacklist/remove", (req, res) => {
     });
 });
 
-js
+
 app.post("/scratch/buy", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
     const playerName = cleanPlayerName(req.body?.playerName);
