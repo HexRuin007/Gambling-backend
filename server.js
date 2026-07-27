@@ -7127,20 +7127,24 @@ app.post("/racing/place-bet", (req, res) => {
         });
     }
 
-const playerId = cleanPlayerId(req.body?.playerId);
-const playerName = cleanPlayerName(req.body?.playerName);
-let amount = cleanAmount(req.body?.amount);
-const horseId = String(req.body?.horseId || "");
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    let amount = cleanAmount(req.body?.amount);
+    const horseId = String(req.body?.horseId || "");
 
-const rewards = getPlayerRewards(playerId);
-const hasFreeBet = rewards.horseFreeBets > 0;
+    const horse = race.horses.find(
+        item => item.id === horseId
+    );
 
-if (!playerId || !playerName || (!hasFreeBet && !amount)) {
-    return res.status(400).json({
-        ok: false,
-        error: "Invalid race bet"
-    });
-}
+    const rewards = getPlayerRewards(playerId);
+    const hasFreeBet = rewards.horseFreeBets > 0;
+
+    if (!playerId || !playerName || (!hasFreeBet && !amount)) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid race bet"
+        });
+    }
 
     if (!horse) {
         return res.status(400).json({
@@ -7184,21 +7188,15 @@ if (!playerId || !playerName || (!hasFreeBet && !amount)) {
         existing.horseName = horse.name;
         existing.confirmed = true;
         existing.updatedAt = Date.now();
-
     } else {
-
-        
         let usingFreeBet = false;
 
         if (rewards.horseFreeBets > 0) {
-
             rewards.horseFreeBets--;
             amount = FREE_BET_FIXED_AMOUNT;
             usingFreeBet = true;
             queueChipSave();
-
         } else {
-
             const reserved = debitChips(
                 playerId,
                 amount,
