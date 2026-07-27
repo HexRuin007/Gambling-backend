@@ -3327,29 +3327,37 @@ function pickDailySpinPrize() {
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
         .filter(isDailySpinPrizeAvailable)
-        .map(prize => ({
-            id: prize.id,
-            type: prize.type,
-            label: prize.label,
+        .map(prize => {
+            const result = {
+                id: prize.id,
+                type: prize.type,
+                label: prize.label,
+                oneTimeGlobal: Boolean(prize.oneTimeGlobal)
+            };
 
-            amount:
+            if (
                 prize.type === "chips" ||
                 prize.type === "scratch_ticket" ||
                 prize.type === "horse_free_bet" ||
                 prize.type === "blackjack_free_bet" ||
-                    ? Number(prize.amount || 1)
-                    : undefined,
+                prize.type === "slot_free_spin" ||
+                prize.type === "mines_free_game" ||
+                prize.type === "roulette_free_bet" ||
+                prize.type === "chicken_free_run"
+            ) {
+                result.amount = Number(prize.amount || 1);
+            }
 
-            quantity:
-                prize.type === "item"
-                    ? Number(prize.quantity || 1)
-                    : undefined,
+            if (prize.type === "item") {
+                result.quantity = Number(prize.quantity || 1);
+            }
 
-            itemName:
-                prize.itemName || null,
+            if (prize.itemName) {
+                result.itemName = prize.itemName;
+            }
 
-            oneTimeGlobal: Boolean(prize.oneTimeGlobal)
-        }));
+            return result;
+        });
 }
 function getDailySpinStatus(playerId) {
     const id = cleanPlayerId(playerId);
