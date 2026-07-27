@@ -3913,12 +3913,15 @@ app.post("/chips/blacklist/remove", (req, res) => {
 
 
 app.post("/scratch/buy", (req, res) => {
-    const playerId = cleanPlayerId(req.body?.playerId);
-    const playerName = cleanPlayerName(req.body?.playerName);
-    let ticketPrice = cleanAmount(req.body?.ticketPrice);
-    let quantity = Math.floor(Number(req.body?.quantity || 1));
+  const playerId = cleanPlayerId(req.body?.playerId);
+const playerName = cleanPlayerName(req.body?.playerName);
+let ticketPrice = cleanAmount(req.body?.ticketPrice);
+let quantity = Math.floor(Number(req.body?.quantity || 1));
 
-    if (!playerId || !playerName || !ticketPrice) {
+const rewards = getPlayerRewards(playerId);
+const hasFreeTicket = rewards.scratchTickets > 0;
+
+if (!playerId || !playerName || (!hasFreeTicket && !ticketPrice)) {
         return res.status(400).json({ ok: false, error: "Invalid scratch ticket purchase" });
     }
 
@@ -3931,7 +3934,7 @@ app.post("/scratch/buy", (req, res) => {
 
     rememberPlayer(playerId, playerName);
 
-    const rewards = getPlayerRewards(playerId);
+   
 
     let usingFreeTicket = false;
 
@@ -6912,10 +6915,13 @@ app.post("/blackjack/place-bet", (req, res) => {
     }
 
     const playerId = cleanPlayerId(req.body?.playerId);
-    const playerName = cleanPlayerName(req.body?.playerName);
-    let amount = cleanAmount(req.body?.amount);
+const playerName = cleanPlayerName(req.body?.playerName);
+let amount = cleanAmount(req.body?.amount);
 
-    if (!playerId || !playerName || !amount) {
+const rewards = getPlayerRewards(playerId);
+const hasFreeBet = rewards.blackjackFreeBets > 0;
+
+if (!playerId || !playerName || (!hasFreeBet && !amount)) {
         return res.status(400).json({
             ok: false,
             error: "Invalid blackjack bet"
@@ -6964,7 +6970,6 @@ app.post("/blackjack/place-bet", (req, res) => {
         existing.confirmed = true;
         existing.updatedAt = Date.now();
     } else {
-        const rewards = getPlayerRewards(playerId);
         let usingFreeBet = false;
 
         if (rewards.blackjackFreeBets > 0) {
@@ -7122,21 +7127,20 @@ app.post("/racing/place-bet", (req, res) => {
         });
     }
 
-    const playerId = cleanPlayerId(req.body?.playerId);
-    const playerName = cleanPlayerName(req.body?.playerName);
-    let amount = cleanAmount(req.body?.amount);
-    const horseId = String(req.body?.horseId || "");
+const playerId = cleanPlayerId(req.body?.playerId);
+const playerName = cleanPlayerName(req.body?.playerName);
+let amount = cleanAmount(req.body?.amount);
+const horseId = String(req.body?.horseId || "");
 
-    const horse = race.horses.find(
-        item => item.id === horseId
-    );
+const rewards = getPlayerRewards(playerId);
+const hasFreeBet = rewards.horseFreeBets > 0;
 
-    if (!playerId || !playerName || !amount) {
-        return res.status(400).json({
-            ok: false,
-            error: "Invalid race bet"
-        });
-    }
+if (!playerId || !playerName || (!hasFreeBet && !amount)) {
+    return res.status(400).json({
+        ok: false,
+        error: "Invalid race bet"
+    });
+}
 
     if (!horse) {
         return res.status(400).json({
@@ -7183,7 +7187,7 @@ app.post("/racing/place-bet", (req, res) => {
 
     } else {
 
-        const rewards = getPlayerRewards(playerId);
+        
         let usingFreeBet = false;
 
         if (rewards.horseFreeBets > 0) {
