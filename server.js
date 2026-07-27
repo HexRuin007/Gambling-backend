@@ -8,7 +8,7 @@ import path from "path";
 //redeploy
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991"]);
+const CHIP_RESET_OWNER_IDS = new Set(["207252", "476991"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -49,6 +49,11 @@ const SCRATCH_SYMBOLS = [
 const SCRATCH_MAX_HISTORY = 100;
 const SCRATCH_MAX_TICKETS_PER_PURCHASE = 20;
 const SCRATCH_PAYOUT_FACTOR = 0.70; 
+const freeBet = useFreeBet(playerId, "horseFreeBets");
+
+if (freeBet.ok) {
+    const betAmount = freeBet.amount;
+}
 
 
 const DAILY_SPIN_PRIZES = [
@@ -1999,7 +2004,37 @@ function getPlayerRewards(playerId) {
     return state.dailyRewards[id];
 }
 
+function hasFreeReward(playerId, rewardKey) {
+    const rewards = getPlayerRewards(playerId);
+    return Number(rewards[rewardKey] || 0) > 0;
+}
 
+function consumeFreeReward(playerId, rewardKey) {
+    const rewards = getPlayerRewards(playerId);
+
+    if ((rewards[rewardKey] || 0) <= 0) {
+        return false;
+    }
+
+    rewards[rewardKey]--;
+
+    queueChipSave();
+
+    return true;
+}
+function useFreeBet(playerId, rewardKey) {
+    if (!consumeFreeReward(playerId, rewardKey)) {
+        return {
+            ok: false,
+            error: "No free bet available."
+        };
+    }
+
+    return {
+        ok: true,
+        amount: FREE_BET_FIXED_AMOUNT
+    };
+}
 
 const DEAL_PRIZE_MULTIPLIERS = [
 
@@ -3906,8 +3941,7 @@ app.post("/scratch/buy", (req, res) => {
     let usingFreeTicket = false;
 
     if (rewards.scratchTickets > 0) {
-        // Free ticket: ignore whatever price/quantity the client sent.
-        // Always exactly 1 ticket at the fixed free-bet value.
+        
         rewards.scratchTickets--;
         usingFreeTicket = true;
         ticketPrice = FREE_BET_FIXED_AMOUNT;
@@ -7245,7 +7279,33 @@ app.post("/racing/clear", (req, res) => {
         state: publicState()
     });
 });
+app.post("/horse/use-free-bet", (req, res) => {
+    const playerId = cleanPlayerId(req.body.playerId);
+    const playerName = cleanPlayerName(req.body.playerName || "Player");
+    const horseId = String(req.body.horseId || "");
 
+    if (!playerId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Missing player ID."
+        });
+    }
+
+    if (!horseId) {
+        return res.status(400).json({
+            ok: false,
+            error: "Please choose a horse."
+        });
+    }
+
+    const reward = useFreeBet(playerId, "horseFreeBets");
+
+    if (!reward.ok) {
+        return res.status(400).json(reward);
+    }
+
+    const betAmount = reward.amount;
+});
 
 
 app.post("/racing/start", (req, res) => {
