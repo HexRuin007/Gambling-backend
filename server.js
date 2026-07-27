@@ -93,6 +93,7 @@ const DAILY_SPIN_PRIZES = [
         id: "scratch1",
         type: "scratch_ticket",
         label: "1 Scratch Ticket",
+        itemName: "1 x 10m free Scratch Ticket",
         amount: 1,
         weight: 25
     },
@@ -100,6 +101,7 @@ const DAILY_SPIN_PRIZES = [
         id: "scratch3",
         type: "scratch_ticket",
         label: "3 Scratch Tickets",
+        itemName: "3 x 10m free Scratch Ticket",
         amount: 3,
         weight: 12
     },
@@ -107,6 +109,7 @@ const DAILY_SPIN_PRIZES = [
         id: "scratch5",
         type: "scratch_ticket",
         label: "5 Scratch Tickets",
+        itemName: "5 x 10m free Scratch Ticket",
         amount: 5,
         weight: 5
     },
@@ -115,6 +118,7 @@ const DAILY_SPIN_PRIZES = [
         id: "horse1",
         type: "horse_free_bet",
         label: "1 Free Horse Race Bet",
+        itemName: "1 x 10m free Horse Race Bet",
         amount: 1,
         weight: 16
     },
@@ -122,6 +126,7 @@ const DAILY_SPIN_PRIZES = [
         id: "horse3",
         type: "horse_free_bet",
         label: "3 Free Horse Race Bets",
+        itemName: "3 x 10m free Horse Race Bet",
         amount: 3,
         weight: 5
     },
@@ -130,6 +135,7 @@ const DAILY_SPIN_PRIZES = [
         id: "blackjack1",
         type: "blackjack_free_bet",
         label: "1 Free Blackjack Bet",
+        itemName: "1 x 10m free BlackJack Bet",
         amount: 1,
         weight: 16
     },
@@ -137,6 +143,7 @@ const DAILY_SPIN_PRIZES = [
         id: "blackjack3",
         type: "blackjack_free_bet",
         label: "3 Free Blackjack Bets",
+        itemName: "3 x 10m free BlackJack Bet",
         amount: 3,
         weight: 5
     },
@@ -5064,21 +5071,50 @@ switch (prize.type) {
         break;
 }
 
-    const result = {
-        spinId,
-        dateKey: today,
-        playerId,
-        playerName,
-        prizeId: prize.id,
-        prizeType: prize.type,
-        prizeLabel: prize.label,
-        amount: prize.type === "chips" ? Number(prize.amount || 0) : 0,
-        itemName: prize.type === "item" ? String(prize.itemName || prize.label) : null,
-        quantity: prize.type === "item" ? Math.max(1, Math.floor(Number(prize.quantity || 1))) : 0,
-        deliveryId,
-        deliveryStatus: deliveryId ? "pending" : null,
-        createdAt
-    };
+const rewardTypes = [
+    "scratch_ticket",
+    "horse_free_bet",
+    "blackjack_free_bet",
+    "slot_free_spin",
+    "mines_free_game",
+    "roulette_free_bet",
+    "chicken_free_run"
+];
+
+const result = {
+    spinId,
+    dateKey: today,
+    playerId,
+    playerName,
+    prizeId: prize.id,
+    prizeType: prize.type,
+    prizeLabel: prize.label,
+
+    amount:
+        prize.type === "chips"
+            ? Number(prize.amount || 0)
+            : rewardTypes.includes(prize.type)
+                ? Number(prize.amount || 1)
+                : 0,
+
+    itemName:
+        prize.type === "item"
+            ? String(prize.itemName || prize.label)
+            : rewardTypes.includes(prize.type)
+                ? String(prize.itemName || prize.label)
+                : null,
+
+    quantity:
+        prize.type === "item"
+            ? Math.max(1, Math.floor(Number(prize.quantity || 1)))
+            : rewardTypes.includes(prize.type)
+                ? Math.max(1, Math.floor(Number(prize.amount || 1)))
+                : 0,
+
+    deliveryId,
+    deliveryStatus: deliveryId ? "pending" : null,
+    createdAt
+};
 
     state.dailySpin.claims[playerId] = result;
     state.dailySpin.history.unshift(result);
