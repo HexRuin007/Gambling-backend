@@ -7493,17 +7493,16 @@ app.post("/racing/clear", (req, res) => {
     });
 });
 
-console.log("Registering /lottery/force-draw");
-
 app.post("/lottery/force-draw", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
     try {
-        const result = drawLottery();
+        drawWeeklyLottery();
+
+        scheduleLotteryDraw();
 
         res.json({
             ok: true,
-            result,
             lottery: publicLotteryState(),
             state: publicState()
         });
