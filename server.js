@@ -7493,26 +7493,7 @@ app.post("/racing/clear", (req, res) => {
     });
 });
 
-app.post("/lottery/force-draw", (req, res) => {
-    if (!requireAdmin(req, res)) return;
 
-    try {
-        drawWeeklyLottery();
-
-        scheduleLotteryDraw();
-
-        res.json({
-            ok: true,
-            lottery: publicLotteryState(),
-            state: publicState()
-        });
-    } catch (err) {
-        res.status(500).json({
-            ok: false,
-            error: String(err)
-        });
-    }
-});
 app.post("/horse/use-free-bet", (req, res) => {
     const playerId = cleanPlayerId(req.body.playerId);
     const playerName = cleanPlayerName(req.body.playerName || "Player");
