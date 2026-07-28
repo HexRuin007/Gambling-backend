@@ -4882,9 +4882,7 @@ app.post("/chips/grant", (req, res) => {
     });
 });
 app.post("/chips/withdraw-request", (req, res) => {
-    const playerId = cleanPlayerId(
-        req.body?.playerId
-    );
+    const playerId = cleanPlayerId(req.body?.playerId);
 
     const playerName = cleanPlayerName(
         req.body?.playerName ||
@@ -4892,9 +4890,7 @@ app.post("/chips/withdraw-request", (req, res) => {
         "Player"
     );
 
-    const amount = cleanAmount(
-        req.body?.amount
-    );
+    const amount = cleanAmount(req.body?.amount);
 
     if (!playerId || !playerName || !amount) {
         return res.status(400).json({
@@ -4905,33 +4901,14 @@ app.post("/chips/withdraw-request", (req, res) => {
 
     rememberPlayer(playerId, playerName);
 
-    const currentBalance =
-        getChipBalance(playerId);
+    const currentBalance = getChipBalance(playerId);
 
     if (currentBalance < amount) {
         return res.status(400).json({
             ok: false,
-            error:
-                `You only have ${currentBalance} chips`
+            error: `You only have ${currentBalance} chips`
         });
     }
-    const removed = debitChips(
-    playerId,
-    amount,
-    {
-        playerName,
-        type: "withdrawal_hold",
-        note: "Withdrawal pending approval"
-    }
-);
-
-if (!removed.ok) {
-    return res.status(400).json({
-        ok: false,
-        error: removed.error
-    });
-}
- 
 
     const existing =
         state.chips.withdrawalRequests.find(
@@ -4940,12 +4917,43 @@ if (!removed.ok) {
                 request.status === "pending"
         );
 
+    
     if (existing) {
+
+       
+        creditChips(
+            playerId,
+            existing.amount,
+            {
+                playerName,
+                type: "withdrawal_hold_release",
+                note: "Previous withdrawal updated"
+            }
+        );
+
+        // Hold the new amount
+        const removed = debitChips(
+            playerId,
+            amount,
+            {
+                playerName,
+                type: "withdrawal_hold",
+                note: "Updated withdrawal request"
+            }
+        );
+
+        if (!removed.ok) {
+            return res.status(400).json({
+                ok: false,
+                error: removed.error
+            });
+        }
+
         existing.amount = amount;
         existing.playerName = playerName;
-        existing.currentBalance =
-            currentBalance;
+        existing.currentBalance = getChipBalance(playerId);
         existing.updatedAt = Date.now();
+        existing.held = true;
 
         const bankerGrantInfo =
             getBankerGrantInfoSincePreviousWithdrawal(
@@ -4962,7 +4970,7 @@ if (!removed.ok) {
             playerId,
             playerName,
             amount,
-            currentBalance,
+            currentBalance: existing.currentBalance,
             updated: true,
             ...bankerGrantInfo
         });
@@ -4976,14 +4984,33 @@ if (!removed.ok) {
         });
     }
 
+  
+    const removed = debitChips(
+        playerId,
+        amount,
+        {
+            playerName,
+            type: "withdrawal_hold",
+            note: "Withdrawal pending approval"
+        }
+    );
+
+    if (!removed.ok) {
+        return res.status(400).json({
+            ok: false,
+            error: removed.error
+        });
+    }
+
     const request = {
         withdrawalRequestId:
             crypto.randomBytes(8).toString("hex"),
         playerId,
         playerName,
         amount,
-        currentBalance,
+        currentBalance: getChipBalance(playerId),
         status: "pending",
+        held: true,
         createdAt: Date.now()
     };
 
@@ -4996,9 +5023,7 @@ if (!removed.ok) {
 
     Object.assign(request, bankerGrantInfo);
 
-    state.chips.withdrawalRequests.push(
-        request
-    );
+    state.chips.withdrawalRequests.push(request);
 
     addDiscordEvent("withdrawal-request", {
         withdrawalRequestId:
@@ -5006,7 +5031,7 @@ if (!removed.ok) {
         playerId,
         playerName,
         amount,
-        currentBalance,
+        currentBalance: request.currentBalance,
         updated: false,
         ...bankerGrantInfo
     });
