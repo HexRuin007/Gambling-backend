@@ -5049,11 +5049,13 @@ app.post("/chips/cashout", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
     const playerId = cleanPlayerId(req.body?.playerId);
+
     const playerName = cleanPlayerName(
         req.body?.playerName ||
         state.chips.playerNames[playerId] ||
         "Player"
     );
+
     const amount = cleanAmount(req.body?.amount);
 
     if (!playerId || !amount) {
@@ -5065,33 +5067,6 @@ app.post("/chips/cashout", (req, res) => {
 
     rememberPlayer(playerId, playerName);
 
-    const currentBalance = getChipBalance(playerId);
-
-    if (currentBalance < amount) {
-        return res.status(400).json({
-            ok: false,
-            error: `Player only has ${currentBalance} chips`
-        });
-    }
-
-    const removed = debitChips(
-        playerId,
-        amount,
-        {
-            playerName,
-            type: "cashout",
-            gameType: "",
-            note: "Chips removed after cash out"
-        }
-    );
-
-    if (!removed.ok) {
-        return res.status(400).json({
-            ok: false,
-            error: removed.error
-        });
-    }
-
     const matchingWithdrawal =
         state.chips.withdrawalRequests.find(
             request =>
@@ -5099,20 +5074,28 @@ app.post("/chips/cashout", (req, res) => {
                 request.status === "pending"
         );
 
-    if (matchingWithdrawal) {
-        matchingWithdrawal.status = "completed";
-        matchingWithdrawal.completedAt = Date.now();
-        matchingWithdrawal.amountCompleted = amount;
+    if (!matchingWithdrawal) {
+        return res.status(404).json({
+            ok: false,
+            error: "No pending withdrawal found"
+        });
     }
+
+    matchingWithdrawal.status = "completed";
+    matchingWithdrawal.completedAt = Date.now();
+    matchingWithdrawal.amountCompleted = amount;
+    matchingWithdrawal.held = false;
+
+    queueChipSave();
 
     addDiscordEvent("withdrawal-completed", {
         withdrawalRequestId:
-            matchingWithdrawal?.withdrawalRequestId ||
-            null,
+            matchingWithdrawal.withdrawalRequestId,
         playerId,
         playerName,
         amount,
-        previousBalance: currentBalance,
+        previousBalance:
+            matchingWithdrawal.currentBalance + amount,
         newBalance: displayBalance(playerId)
     });
 
@@ -5120,8 +5103,7 @@ app.post("/chips/cashout", (req, res) => {
         ok: true,
         playerId,
         playerName,
-        amountRemoved: amount,
-        previousBalance: currentBalance,
+        amountCompleted: amount,
         balance: displayBalance(playerId),
         state: publicState()
     });
@@ -5130,29 +5112,50 @@ app.post("/chips/cashout", (req, res) => {
 app.post("/chips/reject", (req, res) => {
     if (!requireAdmin(req, res)) return;
 
-    const requestId = String(
-        req.body?.requestId || ""
+    const withdrawalRequestId = String(
+        req.body?.withdrawalRequestId ||
+        req.body?.requestId ||
+        ""
     ).trim();
 
-    const request = state.chips.requests.find(
-        item =>
-            item.requestId === requestId &&
-            item.status === "pending"
-    );
+    const request =
+        state.chips.withdrawalRequests.find(
+            item =>
+                item.withdrawalRequestId === withdrawalRequestId &&
+                item.status === "pending"
+        );
 
     if (!request) {
         return res.status(404).json({
             ok: false,
-            error: "Chip request not found"
+            error: "Withdrawal request not found"
         });
     }
 
-    state.chips.requests =
-        state.chips.requests.filter(
-            item => item.requestId !== requestId
-        );
+    creditChips(
+        request.playerId,
+        request.amount,
+        {
+            playerName: request.playerName,
+            type: "withdrawal_refund",
+            note: "Withdrawal rejected"
+        }
+    );
+
+    request.status = "rejected";
+    request.held = false;
+    request.completedAt = Date.now();
 
     queueChipSave();
+
+    addDiscordEvent("withdrawal-rejected", {
+        withdrawalRequestId:
+            request.withdrawalRequestId,
+        playerId: request.playerId,
+        playerName: request.playerName,
+        amount: request.amount,
+        balance: displayBalance(request.playerId)
+    });
 
     res.json({
         ok: true,
