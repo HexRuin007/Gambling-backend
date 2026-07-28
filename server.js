@@ -7492,6 +7492,22 @@ app.post("/racing/clear", (req, res) => {
         state: publicState()
     });
 });
+
+app.post("/lottery/force-draw", (req, res) => {
+    try {
+        drawLottery();
+
+        res.json({
+            ok: true,
+            lottery: publicLotteryState()
+        });
+    } catch (err) {
+        res.status(500).json({
+            ok: false,
+            error: String(err)
+        });
+    }
+});
 app.post("/horse/use-free-bet", (req, res) => {
     const playerId = cleanPlayerId(req.body.playerId);
     const playerName = cleanPlayerName(req.body.playerName || "Player");
