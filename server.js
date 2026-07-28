@@ -3190,22 +3190,19 @@ function ensureChickenState() {
 }
 
 function chickenMultiplierForStep(step, riskKey) {
-    const risk = CHICKEN_RISKS[riskKey] || CHICKEN_RISKS.medium;
     if (step <= 1) return 1;
 
-    const riskySteps = step - 1;
-    const fairMultiplier = 1 / Math.pow(risk.survivalChance, riskySteps);
+    const growth = {
+        easy: 1.11,
+        medium: 1.15,
+        hard: 1.20
+    }[riskKey] || 1.22;
 
- 
-    const dampenedMultiplier = 1 + (fairMultiplier - 1) * CHICKEN_GROWTH_FACTOR;
-
-    const finalMultiplier = Math.min(
+    return Math.min(
         CHICKEN_MAX_MULTIPLIER,
-        dampenedMultiplier * CHICKEN_HOUSE_FACTOR
+        Math.round(Math.pow(growth, step - 1) * 100) / 100
     );
-       return Math.max(1, Math.floor(finalMultiplier * 100) / 100);
 }
-
 
 function publicChickenGame(game) {
     if (!game) return null;
