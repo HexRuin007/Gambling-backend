@@ -4915,6 +4915,22 @@ app.post("/chips/withdraw-request", (req, res) => {
                 `You only have ${currentBalance} chips`
         });
     }
+    const removed = debitChips(
+    playerId,
+    amount,
+    {
+        playerName,
+        type: "withdrawal_hold",
+        note: "Withdrawal pending approval"
+    }
+);
+
+if (!removed.ok) {
+    return res.status(400).json({
+        ok: false,
+        error: removed.error
+    });
+}
  
 
     const existing =
