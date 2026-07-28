@@ -37,6 +37,10 @@ const DAILY_SPIN_MAX_HISTORY = 500;
 const MK15_DAILY_SPIN_ODDS = 100_000;
 const Grinder_DAILY_SPIN_ODDS = 10_000;
 const FREE_BET_FIXED_AMOUNT = 10_000_000;
+const LOTTERY_TICKET_PRICE = 100_000_000;
+const LOTTERY_DRAW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; 
+const LOTTERY_MAX_HISTORY = 50;
+let lotteryDrawTimer = null;
 const SCRATCH_SYMBOLS = [
     { id: "blank",  label: "🖕", weight: 40, multiplier: 0   }, 
     { id: "pear",   label: "🍐", weight: 25, multiplier: 1.5 },
@@ -198,6 +202,12 @@ const wheel = [
 
 const state = {
       dailyRewards: {},
+    lottery: {
+    tickets: {},      
+    totalTickets: 0,
+    history: [],
+    drawsAt: null
+},
     chips: {
         balances: {},
         playerNames: {},
@@ -356,6 +366,18 @@ function loadChipData() {
     if (saved.scratch.pending &&
         typeof saved.scratch.pending === "object") {
         state.scratch.pending = saved.scratch.pending;
+    }
+}
+        if (saved.lottery && typeof saved.lottery === "object") {
+    if (saved.lottery.tickets && typeof saved.lottery.tickets === "object") {
+        state.lottery.tickets = saved.lottery.tickets;
+    }
+    state.lottery.totalTickets = Number(saved.lottery.totalTickets || 0);
+    if (Array.isArray(saved.lottery.history)) {
+        state.lottery.history = saved.lottery.history.slice(0, LOTTERY_MAX_HISTORY);
+    }
+    if (Number.isFinite(Number(saved.lottery.drawsAt))) {
+        state.lottery.drawsAt = Number(saved.lottery.drawsAt);
     }
 }
         if (
@@ -548,6 +570,12 @@ function saveChipDataImmediately() {
    scratch: {
     history: state.scratch.history,
     pending: state.scratch.pending
+},
+            lottery: {
+    tickets: state.lottery.tickets,
+    totalTickets: state.lottery.totalTickets,
+    history: state.lottery.history,
+    drawsAt: state.lottery.drawsAt
 },
             mines: {
                 games: state.mines.games,
@@ -3292,6 +3320,167 @@ function finishChickenGame(
     queueChipSave();
 }
 
+function ensureLotteryRound() {
+    if (!Number.isFinite(Number(state.lottery.drawsAt))) {
+        state.lottery.drawsAt = Date.now() + LOTTERY_DRAW_INTERVAL_MS;
+        queueChipSave();
+    }
+    return state.lottery;
+}
+
+function publicLotteryState() {
+    ensureLotteryRound();
+
+    const entries = Object.entries(state.lottery.tickets)
+        .map(([playerId, entry]) => ({
+            playerId,
+            playerName: entry.playerName,
+            count: entry.count
+        }))
+        .sort((a, b) => b.count - a.count);
+
+    return {
+        ticketPrice: LOTTERY_TICKET_PRICE,
+        totalTickets: state.lottery.totalTickets,
+        pot: state.lottery.totalTickets * LOTTERY_TICKET_PRICE,
+        drawsAt: state.lottery.drawsAt,
+        entries: entries.slice(0, 100),
+        history: state.lottery.history.slice(0, LOTTERY_MAX_HISTORY)
+    };
+}
+
+function buyLotteryTickets(playerId, playerName, quantity) {
+    ensureLotteryRound();
+
+    const id = cleanPlayerId(playerId);
+    const name = cleanPlayerName(playerName);
+    const count = Math.floor(Number(quantity || 0));
+
+    if (!id || !name || !Number.isInteger(count) || count < 1 || count > 1000) {
+        return { ok: false, error: "Choose between 1 and 1000 tickets" };
+    }
+
+    rememberPlayer(id, name);
+
+    const totalCost = count * LOTTERY_TICKET_PRICE;
+
+    const debit = debitChips(id, totalCost, {
+        playerName: name,
+        type: "bet",
+        gameType: "lottery",
+        note: `Bought ${count} weekly lottery ticket(s)`
+    });
+
+    if (!debit.ok) {
+        return debit;
+    }
+
+    if (!state.lottery.tickets[id]) {
+        state.lottery.tickets[id] = { playerName: name, count: 0 };
+    }
+
+    state.lottery.tickets[id].playerName = name;
+    state.lottery.tickets[id].count += count;
+    state.lottery.totalTickets += count;
+
+    queueChipSave();
+
+    return {
+        ok: true,
+        ticketsBought: count,
+        totalCost,
+        balance: displayBalance(id)
+    };
+}
+
+function drawWeeklyLottery() {
+    ensureLotteryRound();
+
+    const entries = Object.entries(state.lottery.tickets);
+    const totalTickets = state.lottery.totalTickets;
+    const pot = totalTickets * LOTTERY_TICKET_PRICE;
+
+    let winnerId = null;
+    let winnerName = null;
+
+    if (entries.length && totalTickets > 0) {
+        // Weighted draw: each ticket is one entry in the pool
+        let roll = crypto.randomInt(0, totalTickets);
+
+        for (const [playerId, entry] of entries) {
+            roll -= entry.count;
+            if (roll < 0) {
+                winnerId = playerId;
+                winnerName = entry.playerName;
+                break;
+            }
+        }
+
+        if (winnerId && pot > 0) {
+            creditChips(winnerId, pot, {
+                playerName: winnerName,
+                type: "payout",
+                gameType: "lottery",
+                note: `Weekly lottery win — ${totalTickets} tickets sold`
+            });
+        }
+    }
+
+    state.lottery.history.unshift({
+        drawId: crypto.randomBytes(8).toString("hex"),
+        winnerId,
+        winnerName,
+        pot,
+        totalTickets,
+        entries: entries.map(([playerId, entry]) => ({
+            playerId,
+            playerName: entry.playerName,
+            count: entry.count
+        })),
+        drawnAt: Date.now()
+    });
+
+    state.lottery.history = state.lottery.history.slice(0, LOTTERY_MAX_HISTORY);
+
+    state.lottery.tickets = {};
+    state.lottery.totalTickets = 0;
+    state.lottery.drawsAt = Date.now() + LOTTERY_DRAW_INTERVAL_MS;
+
+    queueChipSave();
+
+    if (winnerId) {
+        addDiscordEvent("lottery-draw", {
+            winnerId,
+            winnerName,
+            pot,
+            totalTickets
+        });
+    }
+}
+
+function scheduleLotteryDraw() {
+    ensureLotteryRound();
+
+    if (lotteryDrawTimer) {
+        clearTimeout(lotteryDrawTimer);
+        lotteryDrawTimer = null;
+    }
+
+    const delay = Math.max(0, Number(state.lottery.drawsAt) - Date.now());
+
+    lotteryDrawTimer = setTimeout(() => {
+        lotteryDrawTimer = null;
+
+        try {
+            drawWeeklyLottery();
+        } catch (error) {
+            console.error("Weekly lottery draw failed:", error);
+        }
+
+        scheduleLotteryDraw();
+    }, delay);
+}
+
 function isDailySpinPrizeAvailable(prize) {
     return !(
         prize.oneTimeGlobal &&
@@ -3350,6 +3539,8 @@ function pickDailySpinPrize() {
 
     return availablePrizes[availablePrizes.length - 1];
 }
+
+
 
 function publicDailySpinPrizes() {
     return DAILY_SPIN_PRIZES
@@ -3433,12 +3624,14 @@ function publicState() {
         rewards: publicRewardsState(),
         roulette: publicRouletteState(),
         chicken: publicChickenState(),
-        scratch:{ history: state.scratch.history
-},
+        scratch: {
+            history: state.scratch.history
+        },
         dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
-        racing: publicRacingState()
+        racing: publicRacingState(),
+        lottery: publicLotteryState()
     };
 }
 function publicRewardsState() {
@@ -4224,6 +4417,11 @@ app.post("/chips/reset-player", (req, res) => {
             error: `No casino account found for player ${playerId}`
         });
     }
+    const lotteryEntry = state.lottery.tickets[playerId];
+if (lotteryEntry) {
+    state.lottery.totalTickets = Math.max(0, state.lottery.totalTickets - lotteryEntry.count);
+    delete state.lottery.tickets[playerId];
+}
 
     delete state.chips.balances[playerId];
     delete state.chips.playerNames[playerId];
@@ -4380,6 +4578,11 @@ app.post("/chips/reset-all", (req, res) => {
     state.chips.leaderboardStats = {};
     state.chips.fundingBalances = {};
     state.chips.lastBetFunding = {};
+    state.lottery.tickets = {};
+    state.lottery.totalTickets = 0;
+    state.lottery.history = [];
+    state.lottery.drawsAt = Date.now() + LOTTERY_DRAW_INTERVAL_MS;
+    scheduleLotteryDraw();
 
     state.slots.freeSpins = {};
     state.slots.lastPaidBet = {};
@@ -5567,7 +5770,23 @@ app.post(
         });
     }
 );
+app.post("/lottery/buy-tickets", (req, res) => {
+    const result = buyLotteryTickets(
+        req.body?.playerId,
+        req.body?.playerName,
+        req.body?.quantity
+    );
 
+    if (!result.ok) {
+        return res.status(400).json(result);
+    }
+
+    res.json({
+        ok: true,
+        ...result,
+        state: publicState()
+    });
+});
 
 app.post("/slots/spin", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
@@ -7348,6 +7567,7 @@ process.on("SIGINT", () => {
 });
 
 loadChipData();
+scheduleLotteryDraw();
 
 app.listen(PORT, () => {
     console.log(`TT Shared Casino server running on port ${PORT}`);
