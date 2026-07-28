@@ -7496,14 +7496,16 @@ app.post("/racing/clear", (req, res) => {
 console.log("Registering /lottery/force-draw");
 
 app.post("/lottery/force-draw", (req, res) => {
-    console.log("Force draw called");
+    if (!requireAdmin(req, res)) return;
 
     try {
-        drawLottery();
+        const result = drawLottery();
 
         res.json({
             ok: true,
-            lottery: publicLotteryState()
+            result,
+            lottery: publicLotteryState(),
+            state: publicState()
         });
     } catch (err) {
         res.status(500).json({
