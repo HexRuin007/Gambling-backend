@@ -7493,7 +7493,11 @@ app.post("/racing/clear", (req, res) => {
     });
 });
 
+console.log("Registering /lottery/force-draw");
+
 app.post("/lottery/force-draw", (req, res) => {
+    console.log("Force draw called");
+
     try {
         drawLottery();
 
