@@ -5688,8 +5688,7 @@ app.post(
         const request =
             state.chips.withdrawalRequests.find(
                 item =>
-                    item.withdrawalRequestId ===
-                        withdrawalRequestId &&
+                    item.withdrawalRequestId === withdrawalRequestId &&
                     item.status === "pending"
             );
 
@@ -5701,44 +5700,11 @@ app.post(
             });
         }
 
-        const currentBalance =
-            getChipBalance(request.playerId);
-
-        if (currentBalance < request.amount) {
-            return res.status(400).json({
-                ok: false,
-                error:
-                    `Player only has ${currentBalance} chips`
-            });
-        }
-
-        const removed = debitChips(
-            request.playerId,
-            request.amount,
-            {
-                playerName: request.playerName,
-                type: "cashout",
-                gameType: "",
-                note:
-                    `Discord withdrawal completed by ` +
-                    `${discordDisplayName} ` +
-                    `(${discordUserId || "unknown"})`
-            }
-        );
-
-        if (!removed.ok) {
-            return res.status(400).json({
-                ok: false,
-                error: removed.error
-            });
-        }
-
         request.status = "completed";
         request.completedAt = Date.now();
-        request.amountCompleted =
-            request.amount;
-        request.handledBy =
-            discordDisplayName;
+        request.amountCompleted = request.amount;
+        request.held = false;
+        request.handledBy = discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
 
@@ -5750,11 +5716,8 @@ app.post(
             withdrawalRequestId,
             playerId: request.playerId,
             playerName: request.playerName,
-            amountRemoved: request.amount,
-            previousBalance:
-                currentBalance,
-            newBalance:
-                getChipBalance(request.playerId)
+            amountCompleted: request.amount,
+            newBalance: getChipBalance(request.playerId)
         });
     }
 );
@@ -5793,10 +5756,28 @@ app.post(
             });
         }
 
+        const refunded = creditChips(
+            request.playerId,
+            request.amount,
+            {
+                playerName: request.playerName,
+                type: "withdrawal_refund",
+                note:
+                    `Discord withdrawal denied by ${discordDisplayName} (${discordUserId || "unknown"})`
+            }
+        );
+
+        if (!refunded) {
+            return res.status(400).json({
+                ok: false,
+                error: "Could not refund chips"
+            });
+        }
+
         request.status = "denied";
         request.deniedAt = Date.now();
-        request.handledBy =
-            discordDisplayName;
+        request.held = false;
+        request.handledBy = discordDisplayName;
         request.handledByDiscordId =
             discordUserId || null;
 
@@ -5808,9 +5789,8 @@ app.post(
             withdrawalRequestId,
             playerId: request.playerId,
             playerName: request.playerName,
-            amount: request.amount,
-            currentBalance:
-                getChipBalance(request.playerId)
+            amountRefunded: request.amount,
+            newBalance: getChipBalance(request.playerId)
         });
     }
 );
