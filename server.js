@@ -168,7 +168,7 @@ const CHIP_DATA_FILE = path.join(DATA_DIRECTORY, "casino-chips.json");
 let chipSaveTimer = null;
 const app = express();
 app.use(compression());
-app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin", "X-Discord-Bot-Secret"] }));
+app.use(cors({ origin: "*", methods: ["GET", "POST", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization", "X-Banker-Pin", "X--Bot-Secret"] }));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -5480,6 +5480,16 @@ app.get("/discord/chips/events", (req, res) => {
             .slice(0, 100)
             .map(event => ({ ...event }))
     });
+});
+
+app.get("/discord/daily-spin/pending", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const pending = Object.values(state.dailySpin.deliveries || {})
+        .filter(delivery => delivery.status === "pending")
+        .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+
+    res.json({ ok: true, deliveries: pending });
 });
 
 app.post("/discord/chips/event-ack", (req, res) => {
