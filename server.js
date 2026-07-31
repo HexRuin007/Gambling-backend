@@ -81,7 +81,7 @@ const DAILY_SPIN_PRIZES = [
         label: "10K Random BXP",
         itemName: "10K x Random BXP",
         quantity: 1,
-        weight: 10
+        weight: 6
     },
     {
         id: "bxp25k",
@@ -99,7 +99,7 @@ const DAILY_SPIN_PRIZES = [
         label: "1 Scratch Ticket",
         itemName: "1 x 10m free Scratch Ticket",
         amount: 1,
-        weight: 25
+        weight: 27
     },
     {
         id: "scratch3",
@@ -107,7 +107,7 @@ const DAILY_SPIN_PRIZES = [
         label: "3 Scratch Tickets",
         itemName: "3 x 10m free Scratch Ticket",
         amount: 3,
-        weight: 12
+        weight: 14
     },
     {
         id: "scratch5",
