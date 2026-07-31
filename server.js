@@ -184,20 +184,20 @@ let rouletteAutoTimer = null;
 
 const wheel = [
   
-    { multiplier: 0,    weight: 0 },
-    { multiplier: 0.1,  weight: 0 },
-    { multiplier: 0.25, weight: 0 },
-    { multiplier: 0.5,  weight: 0 },
-    { multiplier: 0.75, weight: 0 },
+    { multiplier: 0,    weight: 15 },
+    { multiplier: 0.1,  weight: 14 },
+    { multiplier: 0.25, weight: 11 },
+    { multiplier: 0.5,  weight: 9 },
+    { multiplier: 0.75, weight: 6 },
 
-    { multiplier: 1,    weight: 0 },
+    { multiplier: 1,    weight: 5 },
 
-    { multiplier: 1.25, weight: 0 },
-    { multiplier: 1.5,  weight: 0 },
-    { multiplier: 2,    weight: 0 },
-    { multiplier: 3,    weight: 0 },
-    { multiplier: 5,    weight: 0 },
-    { multiplier: 10,   weight: 100}
+    { multiplier: 1.25, weight: 16.5 },
+    { multiplier: 1.5,  weight: 10 },
+    { multiplier: 2,    weight: 8 },
+    { multiplier: 3,    weight: 3 },
+    { multiplier: 5,    weight: 2 },
+    { multiplier: 10,   weight: 0.5}
 ];
 
 const state = {
