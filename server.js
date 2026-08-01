@@ -81,7 +81,7 @@ const DAILY_SPIN_PRIZES = [
         label: "10K Random BXP",
         itemName: "10K x Random BXP",
         quantity: 1,
-        weight: 6
+        weight: 4
     },
     {
         id: "bxp25k",
@@ -89,7 +89,7 @@ const DAILY_SPIN_PRIZES = [
         label: "25K Random BXP",
         itemName: "25K x Random BXP",
         quantity: 1,
-        weight: 4
+        weight: 2
     },
 
     
@@ -124,7 +124,7 @@ const DAILY_SPIN_PRIZES = [
         label: "1 Free Horse Race Bet",
         itemName: "1 x 10m free Horse Race Bet",
         amount: 1,
-        weight: 16
+        weight: 18
     },
     {
         id: "horse3",
@@ -132,7 +132,7 @@ const DAILY_SPIN_PRIZES = [
         label: "3 Free Horse Race Bets",
         itemName: "3 x 10m free Horse Race Bet",
         amount: 3,
-        weight: 5
+        weight: 7
     },
 
     {
