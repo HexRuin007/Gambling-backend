@@ -3328,7 +3328,7 @@ function ensureLotteryRound() {
     return state.lottery;
 }
 
-function publicLotteryState() {
+function publicLotteryState(playerId = "") {
     ensureLotteryRound();
 
     const entries = Object.entries(state.lottery.tickets)
@@ -3339,13 +3339,17 @@ function publicLotteryState() {
         }))
         .sort((a, b) => b.count - a.count);
 
+    const id = cleanPlayerId(playerId);
+
     return {
         ticketPrice: LOTTERY_TICKET_PRICE,
         totalTickets: state.lottery.totalTickets,
         pot: state.lottery.totalTickets * LOTTERY_TICKET_PRICE,
         drawsAt: state.lottery.drawsAt,
         entries: entries.slice(0, 100),
-        history: state.lottery.history.slice(0, LOTTERY_MAX_HISTORY)
+        history: state.lottery.history.slice(0, LOTTERY_MAX_HISTORY),
+        
+        eligible: id ? hasReceivedPaidChipGrant(id) : null
     };
 }
 
@@ -3361,6 +3365,13 @@ function buyLotteryTickets(playerId, playerName, quantity) {
     }
 
     rememberPlayer(id, name);
+
+    if (!hasReceivedPaidChipGrant(id)) {
+        return {
+            ok: false,
+            error: "Only players who have received paid chips from a banker can enter the weekly lottery"
+        };
+    }
 
     const totalCost = count * LOTTERY_TICKET_PRICE;
 
@@ -3615,7 +3626,7 @@ function publicDailySpinState() {
     };
 }
 
-function publicState() {
+function publicState(playerId = "") {
     return {
         chips: publicChipState(),
         slots: publicSlotsState(),
@@ -3624,14 +3635,12 @@ function publicState() {
         rewards: publicRewardsState(),
         roulette: publicRouletteState(),
         chicken: publicChickenState(),
-        scratch: {
-            history: state.scratch.history
-        },
+        scratch: { history: state.scratch.history },
         dailySpin: publicDailySpinState(),
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState(),
-        lottery: publicLotteryState()
+        lottery: publicLotteryState(playerId)
     };
 }
 function publicRewardsState() {
@@ -3964,7 +3973,7 @@ app.get("/state", (req, res) => {
     res.json({
         ok: true,
         serverTime: Date.now(),
-        state: publicState()
+        state: publicState(req.query?.playerId)
     });
 });
 
@@ -3984,6 +3993,16 @@ app.post("/admin-login", (req, res) => {
 function getBlacklistEntry(playerId) {
     const id = cleanPlayerId(playerId);
     return id ? state.chips.blacklist?.[id] || null : null;
+}
+function hasReceivedPaidChipGrant(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return false;
+
+    return state.chips.transactions.some(transaction =>
+        cleanPlayerId(transaction.playerId) === id &&
+        transaction.type === "banker-grant" &&
+        transaction.grantType === "paid"
+    );
 }
 
 function rejectBlacklistedPlayer(req, res, next) {
@@ -5818,7 +5837,7 @@ app.post("/lottery/buy-tickets", (req, res) => {
     res.json({
         ok: true,
         ...result,
-        state: publicState()
+        state: publicState(req.body?.playerId)
     });
 });
 
