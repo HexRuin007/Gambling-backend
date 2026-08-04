@@ -2448,6 +2448,46 @@ function publicWheelState() {
         wheel: wheel.map(item => item.multiplier)
     };
 }
+function hasReceivedPaidChipGrant(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return false;
+
+    return state.chips.transactions.some(transaction =>
+        cleanPlayerId(transaction.playerId) === id &&
+        transaction.type === "banker-grant" &&
+        transaction.grantType === "paid"
+    );
+}
+
+function hasFreeChipGrantSinceLastWithdrawal(playerId) {
+    const id = cleanPlayerId(playerId);
+    if (!id) return false;
+
+   
+    const lastCompletedWithdrawal = state.chips.withdrawalRequests
+        .filter(request =>
+            cleanPlayerId(request.playerId) === id &&
+            request.status === "completed"
+        )
+        .sort((a, b) =>
+            Number(b.completedAt || b.createdAt || 0) -
+            Number(a.completedAt || a.createdAt || 0)
+        )[0] || null;
+
+    const sinceTimestamp = Number(
+        lastCompletedWithdrawal?.completedAt ||
+        lastCompletedWithdrawal?.createdAt ||
+        0
+    );
+
+
+    return state.chips.transactions.some(transaction =>
+        cleanPlayerId(transaction.playerId) === id &&
+        transaction.type === "banker-grant" &&
+        transaction.grantType === "free" &&
+        Number(transaction.createdAt || 0) > sinceTimestamp
+    );
+}
 
 function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     const suits = ["♠", "♥", "♦", "♣"];
@@ -3341,6 +3381,13 @@ function publicLotteryState(playerId = "") {
 
     const id = cleanPlayerId(playerId);
 
+    let eligible = null;
+    if (id) {
+        eligible =
+            hasReceivedPaidChipGrant(id) &&
+            !hasFreeChipGrantSinceLastWithdrawal(id);
+    }
+
     return {
         ticketPrice: LOTTERY_TICKET_PRICE,
         totalTickets: state.lottery.totalTickets,
@@ -3348,8 +3395,7 @@ function publicLotteryState(playerId = "") {
         drawsAt: state.lottery.drawsAt,
         entries: entries.slice(0, 100),
         history: state.lottery.history.slice(0, LOTTERY_MAX_HISTORY),
-        
-        eligible: id ? hasReceivedPaidChipGrant(id) : null
+        eligible
     };
 }
 
@@ -3370,6 +3416,13 @@ function buyLotteryTickets(playerId, playerName, quantity) {
         return {
             ok: false,
             error: "Only players who have received paid chips from a banker can enter the weekly lottery"
+        };
+    }
+
+    if (hasFreeChipGrantSinceLastWithdrawal(id)) {
+        return {
+            ok: false,
+            error: "You've received free chips since your last withdrawal. Cash out or play those down before entering the lottery."
         };
     }
 
