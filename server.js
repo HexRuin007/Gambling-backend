@@ -4047,16 +4047,7 @@ function getBlacklistEntry(playerId) {
     const id = cleanPlayerId(playerId);
     return id ? state.chips.blacklist?.[id] || null : null;
 }
-function hasReceivedPaidChipGrant(playerId) {
-    const id = cleanPlayerId(playerId);
-    if (!id) return false;
 
-    return state.chips.transactions.some(transaction =>
-        cleanPlayerId(transaction.playerId) === id &&
-        transaction.type === "banker-grant" &&
-        transaction.grantType === "paid"
-    );
-}
 
 function rejectBlacklistedPlayer(req, res, next) {
     const exemptPaths = new Set([
