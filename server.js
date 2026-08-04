@@ -5867,6 +5867,41 @@ app.post(
         });
     }
 );
+app.get("/discord/chips/player-audit", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const playerId = cleanPlayerId(req.query?.playerId);
+
+    if (!playerId) {
+        return res.status(400).json({ ok: false, error: "Enter a player ID" });
+    }
+
+    const playerExists =
+        Object.prototype.hasOwnProperty.call(state.chips.balances, playerId) ||
+        Boolean(state.chips.playerNames[playerId]);
+
+    if (!playerExists) {
+        return res.status(404).json({ ok: false, error: "Player was not found" });
+    }
+
+    const grantInfo = getBankerGrantInfoSincePreviousWithdrawal(playerId);
+
+    const recentDailySpins = state.dailySpin.history
+        .filter(entry => cleanPlayerId(entry.playerId) === playerId)
+        .slice(0, 5)
+        .map(entry => ({ ...entry }));
+
+    res.json({
+        ok: true,
+        player: {
+            playerId,
+            playerName: state.chips.playerNames[playerId] || "Player",
+            currentBalance: getChipBalance(playerId)
+        },
+        grantInfo,
+        recentDailySpins
+    });
+});
 app.post("/lottery/buy-tickets", (req, res) => {
     const result = buyLotteryTickets(
         req.body?.playerId,
