@@ -2415,6 +2415,9 @@ function getToken(req) {
 
 function requireAdmin(req, res) {
     const token = getToken(req);
+
+   console.log("TOKEN:", token);
+    console.log("TOKENS:", [...adminTokens]);
     if (!isAdminToken(token)) {
         res.status(403).json({ ok: false, error: "Not banker" });
         return false;
@@ -2657,6 +2660,7 @@ function clearBlackjackTurnTimer() {
 
     state.blackjack.turnExpiresAt = null;
 }
+
 
 function scheduleBlackjackTurnTimeout() {
     clearBlackjackTurnTimer();
@@ -2902,6 +2906,19 @@ function finishBlackjackRound() {
         resetBlackjackTable();
     }, BLACKJACK_RESULT_DELAY_MS);
 
+    queueChipSave();
+}
+function resetBlackjackTable() {
+    const bj = state.blackjack;
+
+    bj.players = [];
+    bj.dealerHand = [];
+    bj.deck = [];
+    bj.status = "waiting";
+    bj.currentTurnIndex = 0;
+    bj.turnExpiresAt = null;
+
+    scheduleBlackjackAutoStart();
     queueChipSave();
 }
     
