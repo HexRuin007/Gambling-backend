@@ -2759,9 +2759,11 @@ function finishBlackjackRound() {
 
     clearBlackjackTurnTimer();
 
+    
     bj.status = "finished";
     bj.currentTurnIndex = -1;
 
+    
     while (handValue(bj.dealerHand) < 17) {
         bj.dealerHand.push(drawDealerCard());
     }
@@ -2823,29 +2825,29 @@ function finishBlackjackRound() {
             hand.status = result;
             hand.finished = true;
             hand.payout = payout;
-           switch (result) {
 
-    case "blackjack":
-        hand.profit = Math.floor(hand.amount * 1.5);
-        break;
+            switch (result) {
+                case "blackjack":
+                    hand.profit = Math.floor(hand.amount * 1.5);
+                    break;
 
-    case "win":
-        hand.profit = hand.amount;
-        break;
+                case "win":
+                    hand.profit = hand.amount;
+                    break;
 
-    case "push":
-        hand.profit = 0;
-        break;
+                case "push":
+                    hand.profit = 0;
+                    break;
 
-    case "lose":
-    case "bust":
-        hand.profit = -hand.amount;
-        break;
+                case "lose":
+                case "bust":
+                    hand.profit = -hand.amount;
+                    break;
 
-    default:
-        hand.profit = payout - hand.amount;
-        break;
-}
+                default:
+                    hand.profit = payout - hand.amount;
+                    break;
+            }
 
             if (payout > 0) {
                 creditChips(
@@ -2891,29 +2893,18 @@ function finishBlackjackRound() {
 
     bj.history = bj.history.slice(0, 20);
 
-if (blackjackResetTimer) {
-    clearTimeout(blackjackResetTimer);
-}
+    if (blackjackResetTimer) {
+        clearTimeout(blackjackResetTimer);
+    }
 
-blackjackResetTimer = setTimeout(() => {
-    blackjackResetTimer = null;
-    resetBlackjackTable();
-}, BLACKJACK_RESULT_DELAY_MS);
+    blackjackResetTimer = setTimeout(() => {
+        blackjackResetTimer = null;
+        resetBlackjackTable();
+    }, BLACKJACK_RESULT_DELAY_MS);
 
-queueChipSave();
-function resetBlackjackTable() {
-    const bj = state.blackjack;
-
-    bj.players = [];
-    bj.dealerHand = [];
-    bj.deck = [];
-    bj.status = "waiting";
-    bj.currentTurnIndex = 0;
-    bj.turnExpiresAt = null;
-
-    scheduleBlackjackAutoStart();
     queueChipSave();
 }
+    
 function publicBlackjackState() {
     const bj = state.blackjack;
     const active = activeBlackjackPlayer();
