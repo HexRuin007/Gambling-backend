@@ -177,6 +177,9 @@ const adminTokens = new Set();
 let wheelAutoTimer = null;
 let blackjackAutoTimer = null;
 let blackjackTurnTimer = null;
+let blackjackResetTimer = null;
+
+const BLACKJACK_RESULT_DELAY_MS = 3000;
 const BLACKJACK_TURN_TIMEOUT_MS = 20_000;
 let racingAutoTimer = null;
 let rouletteAutoTimer = null;
@@ -2887,6 +2890,19 @@ function finishBlackjackRound() {
     });
 
     bj.history = bj.history.slice(0, 20);
+
+if (blackjackResetTimer) {
+    clearTimeout(blackjackResetTimer);
+}
+
+blackjackResetTimer = setTimeout(() => {
+    blackjackResetTimer = null;
+    resetBlackjackTable();
+}, BLACKJACK_RESULT_DELAY_MS);
+
+queueChipSave();
+function resetBlackjackTable() {
+    const bj = state.blackjack;
 
     bj.players = [];
     bj.dealerHand = [];
