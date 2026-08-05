@@ -8,7 +8,7 @@ import path from "path";
 //redeploy
 const PORT = process.env.PORT || 8080;
 const ADMIN_PIN = process.env.ADMIN_PIN || "42069";
-const CHIP_RESET_OWNER_IDS = new Set(["229051", "207252", "476991", "709309"]);
+const CHIP_RESET_OWNER_IDS = new Set([ "207252", "476991", "709309"]);
 const DISCORD_BOT_SECRET = process.env.DISCORD_BOT_SECRET || "";
 const SPIN_DURATION_MS = 4300;
 const RACE_DURATION_MS = 6500;
@@ -2488,6 +2488,46 @@ function hasFreeChipGrantSinceLastWithdrawal(playerId) {
         Number(transaction.createdAt || 0) > sinceTimestamp
     );
 }
+function getPlayerHand(player, handIndex = null) {
+    if (!player) return null;
+
+    if (!player.hands) {
+        player.hands = [{
+            cards: player.hand || [],
+            amount: player.amount || 0,
+            status: player.status || "playing",
+            blackjack: player.blackjack || false,
+            busted: false,
+            doubled: false,
+            split: false,
+            finished: false
+        }];
+
+        player.activeHand = 0;
+    }
+
+    return player.hands[
+        handIndex ?? player.activeHand ?? 0
+    ];
+}
+
+function getCurrentCards(player) {
+    return getPlayerHand(player).cards;
+}
+
+function getCurrentTotal(player) {
+    return handValue(getCurrentCards(player));
+}
+
+function isCurrentHandFinished(player) {
+    const hand = getPlayerHand(player);
+
+    return (
+        hand.status !== "playing" ||
+        hand.busted ||
+        hand.finished
+    );
+}
 
 function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     const suits = ["♠", "♥", "♦", "♣"];
@@ -2589,10 +2629,23 @@ function handValue(hand) {
 }
 
 function activeBlackjackPlayer() {
-    if (state.blackjack.status !== "playing") return null;
-    return state.blackjack.players[state.blackjack.currentTurnIndex] || null;
-}
+    const bj = state.blackjack;
 
+    if (
+        bj.currentTurnIndex < 0 ||
+        bj.currentTurnIndex >= bj.players.length
+    ) {
+        return null;
+    }
+
+    const player = bj.players[bj.currentTurnIndex];
+
+    if (!player) return null;
+
+    getPlayerHand(player);
+
+    return player;
+}
 function clearBlackjackTurnTimer() {
     if (blackjackTurnTimer) {
         clearTimeout(blackjackTurnTimer);
@@ -2606,9 +2659,15 @@ function scheduleBlackjackTurnTimeout() {
     clearBlackjackTurnTimer();
 
     const player = activeBlackjackPlayer();
-    if (!player || player.status !== "playing") return;
+    const hand = player ? getPlayerHand(player) : null;
+
+    if (!player || !hand || hand.status !== "playing") {
+        return;
+    }
 
     const expectedPlayerId = player.playerId;
+    const expectedHand = player.activeHand;
+
     state.blackjack.turnExpiresAt =
         Date.now() + BLACKJACK_TURN_TIMEOUT_MS;
 
@@ -2616,31 +2675,37 @@ function scheduleBlackjackTurnTimeout() {
         blackjackTurnTimer = null;
 
         const current = activeBlackjackPlayer();
+        const currentHand = current ? getPlayerHand(current) : null;
+
         if (
             !current ||
             current.playerId !== expectedPlayerId ||
-            current.status !== "playing"
+            current.activeHand !== expectedHand ||
+            !currentHand ||
+            currentHand.status !== "playing"
         ) {
             return;
         }
 
         const refunded = creditChips(
             current.playerId,
-            current.amount,
+            currentHand.amount,
             {
                 playerName: current.playerName,
                 type: "bet-refund",
                 gameType: "blackjack",
-                note: "Blackjack bet cancelled after 45 seconds of inactivity"
+                note: "Blackjack hand cancelled after inactivity"
             }
         );
 
-        current.status = refunded
+        currentHand.status = refunded
             ? "cancelled-inactive"
             : "cancelled-refund-failed";
-        current.payout = refunded ? current.amount : 0;
-        current.profit = refunded ? 0 : -current.amount;
-        current.cancelledAt = Date.now();
+
+        currentHand.finished = true;
+        currentHand.payout = refunded ? currentHand.amount : 0;
+        currentHand.profit = refunded ? 0 : -currentHand.amount;
+        currentHand.cancelledAt = Date.now();
 
         moveToNextBlackjackTurn();
     }, BLACKJACK_TURN_TIMEOUT_MS);
@@ -2649,13 +2714,34 @@ function scheduleBlackjackTurnTimeout() {
 function moveToNextBlackjackTurn() {
     clearBlackjackTurnTimer();
 
-    while (state.blackjack.currentTurnIndex < state.blackjack.players.length - 1) {
-        state.blackjack.currentTurnIndex += 1;
-        const player = state.blackjack.players[state.blackjack.currentTurnIndex];
-        if (player && player.status === "playing") {
-            scheduleBlackjackTurnTimeout();
-            return;
+    const bj = state.blackjack;
+
+    while (bj.currentTurnIndex < bj.players.length) {
+        const player = bj.players[bj.currentTurnIndex];
+
+        if (!player) {
+            bj.currentTurnIndex++;
+            continue;
         }
+
+        player.activeHand ??= 0;
+
+       
+        while (player.activeHand < player.hands.length) {
+            const hand = player.hands[player.activeHand];
+
+            if (!hand.finished && hand.status === "playing") {
+                scheduleBlackjackTurnTimeout();
+                return;
+            }
+
+            player.activeHand++;
+        }
+
+       
+        player.finished = true;
+
+        bj.currentTurnIndex++;
     }
 
     finishBlackjackRound();
@@ -2663,9 +2749,13 @@ function moveToNextBlackjackTurn() {
 
 function finishBlackjackRound() {
     const bj = state.blackjack;
-    if (bj.status !== "playing") return;
+
+    if (bj.status !== "playing") {
+        return;
+    }
 
     clearBlackjackTurnTimer();
+
     bj.status = "finished";
     bj.currentTurnIndex = -1;
 
@@ -2676,93 +2766,192 @@ function finishBlackjackRound() {
     const dealerTotal = handValue(bj.dealerHand);
     const dealerBust = dealerTotal > 21;
 
-    bj.players.forEach(player => {
-        if (
-            player.status === "cancelled-inactive" ||
-            player.status === "cancelled-refund-failed"
-        ) {
-            return;
-        }
+    for (const player of bj.players) {
 
-        const total = handValue(player.hand);
-        let result = "lose";
-        let payout = 0;
+        player.finished = true;
 
-        if (total > 21) {
-            result = "bust";
-            payout = 0;
-        } else if (dealerBust || total > dealerTotal) {
-            result = "win";
-            payout = player.blackjack ? Math.floor(player.amount * 2.5) : player.amount * 2;
-        } else if (total === dealerTotal) {
-            result = "push";
-            payout = player.amount;
-        } else {
-            result = "lose";
-            payout = 0;
-        }
+        for (const hand of player.hands) {
 
-        player.status = result;
-        player.payout = payout;
-        player.profit = payout - player.amount;
-        if (payout > 0) {
-    creditChips(
-        player.playerId,
-        payout,
-        {
-            playerName: player.playerName,
-            type: "payout",
-            gameType: "blackjack",
-            note:
-                result === "push"
-                    ? "Blackjack bet returned"
-                    : "Blackjack winnings"
-        }
-    );
+            if (
+                hand.status === "cancelled-inactive" ||
+                hand.status === "cancelled-refund-failed"
+            ) {
+                continue;
+            }
+
+            const total = handValue(hand.cards);
+
+            let result;
+            let payout = 0;
+
+            if (total > 21) {
+
+                result = "bust";
+
+            } else if (
+                hand.blackjack &&
+                dealerTotal !== 21
+            ) {
+
+                result = "blackjack";
+                payout = Math.floor(hand.amount * 2.5);
+
+            } else if (dealerBust) {
+
+                result = "win";
+                payout = hand.amount * 2;
+
+            } else if (total > dealerTotal) {
+
+                result = "win";
+                payout = hand.amount * 2;
+
+            } else if (total === dealerTotal) {
+
+                result = "push";
+                payout = hand.amount;
+
+            } else {
+
+                result = "lose";
+
+            }
+
+            hand.status = result;
+            hand.finished = true;
+            hand.payout = payout;
+           switch (result) {
+
+    case "blackjack":
+        hand.profit = Math.floor(hand.amount * 1.5);
+        break;
+
+    case "win":
+        hand.profit = hand.amount;
+        break;
+
+    case "push":
+        hand.profit = 0;
+        break;
+
+    case "lose":
+    case "bust":
+        hand.profit = -hand.amount;
+        break;
+
+    default:
+        hand.profit = payout - hand.amount;
+        break;
 }
-    });
+
+            if (payout > 0) {
+                creditChips(
+                    player.playerId,
+                    payout,
+                    {
+                        playerName: player.playerName,
+                        type: "payout",
+                        gameType: "blackjack",
+                        note:
+                            result === "push"
+                                ? "Blackjack bet returned"
+                                : result === "blackjack"
+                                    ? "Blackjack"
+                                    : "Blackjack winnings"
+                    }
+                );
+            }
+        }
+    }
 
     bj.history.unshift({
         createdAt: Date.now(),
-        dealerHand: bj.dealerHand,
+        dealerHand: [...bj.dealerHand],
         dealerTotal,
-        results: bj.players.map(p => ({
-            playerId: p.playerId,
-            playerName: p.playerName,
-            amount: p.amount,
-            hand: p.hand,
-            total: handValue(p.hand),
-            result: p.status,
-            payout: p.payout,
-            profit: p.profit
+        dealerBust,
+        results: bj.players.map(player => ({
+            playerId: player.playerId,
+            playerName: player.playerName,
+            hands: player.hands.map(hand => ({
+                cards: [...hand.cards],
+                total: handValue(hand.cards),
+                amount: hand.amount,
+                status: hand.status,
+                payout: hand.payout,
+                profit: hand.profit,
+                blackjack: !!hand.blackjack,
+                doubled: !!hand.doubled,
+                split: !!hand.split
+            }))
         }))
     });
-    bj.history = bj.history.slice(0, 20);
-}
 
+    bj.history = bj.history.slice(0, 20);
+
+    bj.players = [];
+    bj.dealerHand = [];
+    bj.deck = [];
+    bj.status = "waiting";
+    bj.currentTurnIndex = 0;
+    bj.turnExpiresAt = null;
+
+    scheduleBlackjackAutoStart();
+    queueChipSave();
+}
 function publicBlackjackState() {
     const bj = state.blackjack;
     const active = activeBlackjackPlayer();
 
     return {
         bets: bj.bets,
-        players: bj.players.map(p => ({
-            playerId: p.playerId,
-            playerName: p.playerName,
-            amount: p.amount,
-            hand: p.hand,
-            total: handValue(p.hand),
-            status: p.status,
-            payout: p.payout || 0,
-            profit: p.profit || 0,
-            blackjack: !!p.blackjack
+
+        players: bj.players.map(player => ({
+            playerId: player.playerId,
+            playerName: player.playerName,
+
+            activeHand: player.activeHand ?? 0,
+            finished: !!player.finished,
+
+            hands: player.hands.map(hand => ({
+                cards: [...hand.cards],
+                total: handValue(hand.cards),
+
+                amount: hand.amount,
+
+                status: hand.status,
+
+                payout: hand.payout || 0,
+                profit: hand.profit || 0,
+
+                blackjack: !!hand.blackjack,
+                doubled: !!hand.doubled,
+                split: !!hand.split,
+                busted: !!hand.busted,
+                finished: !!hand.finished
+            }))
         })),
-        dealerHand: bj.status === "playing" ? [bj.dealerHand[0], { rank: "?", suit: "" }] : bj.dealerHand,
-        dealerTotal: bj.status === "playing" ? null : handValue(bj.dealerHand),
+
+        dealerHand:
+            bj.status === "playing"
+                ? [
+                    bj.dealerHand[0],
+                    { rank: "?", suit: "" }
+                ]
+                : [...bj.dealerHand],
+
+        dealerTotal:
+            bj.status === "playing"
+                ? null
+                : handValue(bj.dealerHand),
+
         status: bj.status,
-        currentTurnId: active ? active.playerId : "",
-        currentTurnName: active ? active.playerName : "",
+
+        currentTurnId: active?.playerId || "",
+        currentTurnName: active?.playerName || "",
+        currentHand: active?.activeHand ?? 0,
+
         history: bj.history,
+
         autoStartAt: bj.autoStartAt,
         turnExpiresAt: bj.turnExpiresAt || null,
         turnTimeoutMs: BLACKJACK_TURN_TIMEOUT_MS
@@ -3807,23 +3996,45 @@ function startBlackjackRound() {
     bj.autoStartAt = null;
 
     bj.deck = makeBlackjackShoe(1);
-    bj.dealerHand = [];
-    bj.dealerHand.push(drawDealerCard());
-    bj.dealerHand.push(drawDealerCard());
+
+    bj.dealerHand = [
+        drawDealerCard(),
+        drawDealerCard()
+    ];
 
     bj.players = bj.bets.map(bet => {
-        const hand = [];
-        hand.push(drawPlayerCard(hand));
-        hand.push(drawPlayerCard(hand));
-        const total = handValue(hand);
+
+        const cards = [];
+        cards.push(drawPlayerCard(cards));
+        cards.push(drawPlayerCard(cards));
+
+        const total = handValue(cards);
 
         return {
             playerId: bet.playerId,
             playerName: bet.playerName,
-            amount: bet.amount,
-            hand,
-            status: total === 21 ? "stand" : "playing",
-            blackjack: total === 21
+
+        hands: [
+    {
+        cards,
+        amount: bet.amount,
+
+        status: total === 21 ? "stand" : "playing",
+
+        blackjack: total === 21,
+        busted: total > 21,
+
+        doubled: false,
+        split: false,
+        finished: total === 21,
+
+        payout: 0,
+        profit: -bet.amount
+    }
+],
+
+            activeHand: 0,
+            finished: total === 21
         };
     });
 
@@ -3833,9 +4044,9 @@ function startBlackjackRound() {
 
     while (
         bj.players[bj.currentTurnIndex] &&
-        bj.players[bj.currentTurnIndex].status !== "playing"
+        bj.players[bj.currentTurnIndex].finished
     ) {
-        bj.currentTurnIndex += 1;
+        bj.currentTurnIndex++;
     }
 
     if (bj.currentTurnIndex >= bj.players.length) {
@@ -3845,6 +4056,27 @@ function startBlackjackRound() {
     }
 
     return { ok: true };
+}
+function canDouble(player) {
+    const hand = getPlayerHand(player);
+
+    return (
+        hand.cards.length === 2 &&
+        hand.status === "playing" &&
+        !hand.doubled
+    );
+}
+
+function canSplit(player) {
+    const hand = getPlayerHand(player);
+
+    if (hand.cards.length !== 2)
+        return false;
+
+    return (
+        hand.cards[0].rank ===
+        hand.cards[1].rank
+    );
 }
 
 function startHorseRace() {
@@ -7396,35 +7628,226 @@ app.post("/blackjack/start", (req, res) => {
 });
 
 app.post("/blackjack/hit", (req, res) => {
-    const bj = state.blackjack;
     const playerId = String(req.body?.playerId || "");
     const player = activeBlackjackPlayer();
 
-    if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
+    if (!player || player.playerId !== playerId) {
+        return res.status(403).json({
+            ok: false,
+            error: "Not your turn"
+        });
+    }
+
+    const hand = getPlayerHand(player);
+
+    if (!hand || hand.status !== "playing") {
+        return res.status(400).json({
+            ok: false,
+            error: "This hand has already finished."
+        });
+    }
 
     clearBlackjackTurnTimer();
-    player.hand.push(drawPlayerCard(player.hand));
-    const total = handValue(player.hand);
+
+    hand.cards.push(
+        drawPlayerCard(hand.cards)
+    );
+
+    const total = handValue(hand.cards);
+
     if (total > 21) {
-        player.status = "bust";
+        hand.status = "bust";
+        hand.finished = true;
+        hand.busted = true;
+
+        moveToNextBlackjackTurn();
+    } else if (total === 21) {
+        hand.status = "stand";
+        hand.finished = true;
+
         moveToNextBlackjackTurn();
     } else {
         scheduleBlackjackTurnTimeout();
     }
 
-    res.json({ ok: true, state: publicState() });
+    res.json({
+        ok: true,
+        state: publicState()
+    });
 });
 
 app.post("/blackjack/stand", (req, res) => {
     const playerId = String(req.body?.playerId || "");
     const player = activeBlackjackPlayer();
 
-    if (!player || player.playerId !== playerId) return res.status(403).json({ ok: false, error: "Not your turn" });
+    if (!player || player.playerId !== playerId) {
+        return res.status(403).json({
+            ok: false,
+            error: "Not your turn"
+        });
+    }
+
+    const hand = getPlayerHand(player);
+
+    if (!hand || hand.status !== "playing") {
+        return res.status(400).json({
+            ok: false,
+            error: "This hand has already finished."
+        });
+    }
 
     clearBlackjackTurnTimer();
-    player.status = "stand";
+
+    hand.status = "stand";
+    hand.finished = true;
+
     moveToNextBlackjackTurn();
-    res.json({ ok: true, state: publicState() });
+
+    res.json({
+        ok: true,
+        state: publicState()
+    });
+});
+app.post("/blackjack/double", (req, res) => {
+    const playerId = String(req.body?.playerId || "");
+    const player = activeBlackjackPlayer();
+
+    if (!player || player.playerId !== playerId) {
+        return res.status(403).json({
+            ok: false,
+            error: "Not your turn"
+        });
+    }
+
+    const hand = getPlayerHand(player);
+
+    if (!canDouble(player)) {
+        return res.status(400).json({
+            ok: false,
+            error: "You cannot double this hand."
+        });
+    }
+
+    const debit = debitChips(
+        player.playerId,
+        hand.amount,
+        {
+            playerName: player.playerName,
+            type: "bet-adjustment",
+            gameType: "blackjack",
+            note: "Blackjack Double Down"
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    clearBlackjackTurnTimer();
+
+    hand.amount *= 2;
+    hand.doubled = true;
+
+    hand.cards.push(
+        drawPlayerCard(hand.cards)
+    );
+
+    const total = handValue(hand.cards);
+
+    if (total > 21) {
+        hand.status = "bust";
+        hand.busted = true;
+    } else {
+        hand.status = "stand";
+    }
+
+    hand.finished = true;
+
+    moveToNextBlackjackTurn();
+
+    res.json({
+        ok: true,
+        state: publicState()
+    });
+});
+app.post("/blackjack/split", (req, res) => {
+    const playerId = String(req.body?.playerId || "");
+    const player = activeBlackjackPlayer();
+
+    if (!player || player.playerId !== playerId) {
+        return res.status(403).json({
+            ok: false,
+            error: "Not your turn"
+        });
+    }
+
+    if (!canSplit(player)) {
+        return res.status(400).json({
+            ok: false,
+            error: "You cannot split this hand."
+        });
+    }
+
+    const hand = getPlayerHand(player);
+
+    const debit = debitChips(
+        player.playerId,
+        hand.amount,
+        {
+            playerName: player.playerName,
+            type: "bet-adjustment",
+            gameType: "blackjack",
+            note: "Blackjack Split"
+        }
+    );
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    clearBlackjackTurnTimer();
+
+    const firstCard = hand.cards[0];
+    const secondCard = hand.cards[1];
+
+    hand.cards = [
+        firstCard,
+        drawPlayerCard([firstCard])
+    ];
+
+    hand.split = true;
+    hand.finished = false;
+    hand.status = "playing";
+    hand.blackjack = false;
+
+    const secondHand = {
+        cards: [
+            secondCard,
+            drawPlayerCard([secondCard])
+        ],
+        amount: hand.amount,
+        status: "playing",
+        blackjack: false,
+        busted: false,
+        doubled: false,
+        split: true,
+        finished: false,
+        payout: 0,
+        profit: 0
+    };
+
+    player.hands.splice(
+        player.activeHand + 1,
+        0,
+        secondHand
+    );
+
+    scheduleBlackjackTurnTimeout();
+
+    res.json({
+        ok: true,
+        state: publicState()
+    });
 });
 
 app.post("/blackjack/reset", (req, res) => {
