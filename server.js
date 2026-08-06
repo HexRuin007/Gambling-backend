@@ -2742,6 +2742,7 @@ function finishBlackjackRound() {
 
     const dealerTotal = handValue(bj.dealerHand);
     const dealerBust = dealerTotal > 21;
+    logDealerHand(bj.dealerHand, dealerTotal, dealerBust);
 
     for (const player of bj.players) {
 
@@ -6170,7 +6171,19 @@ app.post("/lottery/buy-tickets", (req, res) => {
         state: publicState(req.body?.playerId)
     });
 });
+const DEALER_LOG_ENABLED = true; 
 
+function logDealerHand(dealerHand, total, busted) {
+    if (!DEALER_LOG_ENABLED) return;
+
+    const cards = dealerHand
+        .map(card => `${card.rank}${card.suit}`)
+        .join(" ");
+
+    console.log(
+        `[dealer] ${cards} => ${total}${busted ? " (bust)" : ""}`
+    );
+}
 app.post("/slots/spin", (req, res) => {
     const playerId = cleanPlayerId(req.body?.playerId);
     const playerName = cleanPlayerName(req.body?.playerName);
