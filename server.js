@@ -2416,8 +2416,6 @@ function getToken(req) {
 function requireAdmin(req, res) {
     const token = getToken(req);
 
-   console.log("TOKEN:", token);
-    console.log("TOKENS:", [...adminTokens]);
     if (!isAdminToken(token)) {
         res.status(403).json({ ok: false, error: "Not banker" });
         return false;
