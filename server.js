@@ -224,7 +224,8 @@ const state = {
         fundingBalances: {},
         lastBetFunding: {},
         blacklist: {},
-        peakBalances: {}
+        peakBalances: {},
+        bankerCollections: {}
     },
     slots: {
         history: [],
@@ -329,6 +330,9 @@ function loadChipData() {
         ) {
             state.chips.balances = saved.balances;
         }
+        if (saved.bankerCollections && typeof saved.bankerCollections === "object") {
+    state.chips.bankerCollections = saved.bankerCollections;
+}
 
         if (
             saved.playerNames &&
@@ -568,8 +572,10 @@ function saveChipDataImmediately() {
             slots: {
                 history: state.slots.history,
                 freeSpins: state.slots.freeSpins,
-                lastPaidBet: state.slots.lastPaidBet
+                lastPaidBet: state.slots.lastPaidBet,
+                
             },
+            bankerCollections: state.chips.bankerCollections,
    scratch: {
     history: state.scratch.history,
     pending: state.scratch.pending
@@ -850,6 +856,95 @@ function cleanPlayerName(value) {
     return String(value || "Player").trim().slice(0, 60);
 }
 
+function cleanDiscordId(value) {
+    return String(value || "").trim().slice(0, 40);
+}
+
+function getOrCreateBankerCollection(discordUserId, discordDisplayName) {
+    const id = cleanDiscordId(discordUserId);
+    if (!id) return null;
+
+    if (!state.chips.bankerCollections[id]) {
+        state.chips.bankerCollections[id] = {
+            discordUserId: id,
+            discordDisplayName: discordDisplayName || "Unknown banker",
+            totalCollected: 0,
+            sinceAt: Date.now(),
+            history: [],
+            settlements: []
+        };
+    }
+
+    const entry = state.chips.bankerCollections[id];
+    if (discordDisplayName) entry.discordDisplayName = discordDisplayName;
+    return entry;
+}
+
+function recordBankerCollection(discordUserId, discordDisplayName, amount, meta = {}) {
+    const value = Math.max(0, Math.floor(Number(amount || 0)));
+    if (!value) return;
+
+    const entry = getOrCreateBankerCollection(discordUserId, discordDisplayName);
+    if (!entry) return;
+
+    entry.totalCollected += value;
+    entry.history.unshift({
+        amount: value,
+        requestId: meta.requestId || null,
+        playerId: meta.playerId || null,
+        playerName: meta.playerName || null,
+        createdAt: Date.now()
+    });
+    entry.history = entry.history.slice(0, 200);
+
+    queueChipSave();
+}
+
+function settleBankerCollection(discordUserId, settledBy = {}) {
+    const id = cleanDiscordId(discordUserId);
+    const entry = state.chips.bankerCollections[id];
+
+    if (!entry) {
+        return { ok: false, error: "No collection tracked for that banker" };
+    }
+
+    if (entry.totalCollected <= 0) {
+        return { ok: false, error: "This banker doesn't owe anything" };
+    }
+
+    const settlement = {
+        settlementId: crypto.randomBytes(8).toString("hex"),
+        amount: entry.totalCollected,
+        sinceAt: entry.sinceAt,
+        settledAt: Date.now(),
+        settledByDiscordId: settledBy.discordUserId || null,
+        settledByDisplayName: settledBy.discordDisplayName || null
+    };
+
+    entry.settlements ||= [];
+    entry.settlements.unshift(settlement);
+    entry.settlements = entry.settlements.slice(0, 50);
+
+    entry.totalCollected = 0;
+    entry.sinceAt = Date.now();
+    entry.history = [];
+
+    queueChipSave();
+
+    return { ok: true, settlement, entry };
+}
+
+function publicBankerCollections() {
+    return Object.values(state.chips.bankerCollections || {})
+        .map(entry => ({
+            discordUserId: entry.discordUserId,
+            discordDisplayName: entry.discordDisplayName,
+            totalCollected: entry.totalCollected,
+            sinceAt: entry.sinceAt,
+            recentHistory: (entry.history || []).slice(0, 10)
+        }))
+        .sort((a, b) => b.totalCollected - a.totalCollected);
+}
 function parseChipAmount(value) {
     if (value == null) return 0;
 
@@ -5858,41 +5953,20 @@ app.get("/discord/chips/requests", (req, res) => {
 app.post("/discord/chips/approve", (req, res) => {
     if (!requireDiscordBot(req, res)) return;
 
-    const requestId = String(
-        req.body?.requestId || ""
-    ).trim();
-
-    const discordUserId = String(
-        req.body?.discordUserId || ""
-    ).trim();
-
-    const discordDisplayName = String(
-        req.body?.discordDisplayName ||
-        "Discord approver"
-    ).trim().slice(0, 80);
-
-    const grantType =
-        String(req.body?.grantType || "paid")
-            .trim()
-            .toLowerCase() === "free"
-            ? "free"
-            : "paid";
+    const requestId = String(req.body?.requestId || "").trim();
+    const discordUserId = String(req.body?.discordUserId || "").trim();
+    const discordDisplayName = String(req.body?.discordDisplayName || "Discord approver").trim().slice(0, 80);
+    const grantType = String(req.body?.grantType || "paid").trim().toLowerCase() === "free" ? "free" : "paid";
 
     const request = state.chips.requests.find(
-        item =>
-            item.requestId === requestId &&
-            item.status === "pending"
+        item => item.requestId === requestId && item.status === "pending"
     );
 
     if (!request) {
-        return res.status(404).json({
-            ok: false,
-            error: "Chip request not found or already handled"
-        });
+        return res.status(404).json({ ok: false, error: "Chip request not found or already handled" });
     }
 
-    const approvedGrantType =
-        request.requestType === "free" ? "free" : "paid";
+    const approvedGrantType = request.requestType === "free" ? "free" : "paid";
 
     const granted = creditChips(
         request.playerId,
@@ -5901,42 +5975,36 @@ app.post("/discord/chips/approve", (req, res) => {
             playerName: request.playerName,
             type: "banker-grant",
             grantType: approvedGrantType,
-            note:
-                `${approvedGrantType === "free" ? "Free" : "Paid"} ` +
-                `Discord approval by ${discordDisplayName} ` +
-                `(${discordUserId || "unknown"})`
+            note: `${approvedGrantType === "free" ? "Free" : "Paid"} Discord approval by ${discordDisplayName} (${discordUserId || "unknown"})`
         }
     );
 
     if (!granted) {
-        return res.status(400).json({
-            ok: false,
-            error: "Could not grant requested chips"
+        return res.status(400).json({ ok: false, error: "Could not grant requested chips" });
+    }
+
+    
+    if (approvedGrantType === "paid") {
+        recordBankerCollection(discordUserId, discordDisplayName, request.amount, {
+            requestId: request.requestId,
+            playerId: request.playerId,
+            playerName: request.playerName
         });
     }
 
-    state.chips.requests =
-        state.chips.requests.filter(
-            item =>
-                item.requestId !== requestId
-        );
+    state.chips.requests = state.chips.requests.filter(item => item.requestId !== requestId);
 
     addDiscordEvent("banker-grant", {
         playerId: request.playerId,
         playerName: request.playerName,
         amount: request.amount,
-        newBalance:
-            getChipBalance(request.playerId),
+        newBalance: getChipBalance(request.playerId),
         source: "discord-approved-request",
         requestId,
         handledBy: discordDisplayName,
-        handledByDiscordId:
-            discordUserId || null,
+        handledByDiscordId: discordUserId || null,
         grantType: approvedGrantType,
-        grantTypeLabel:
-            approvedGrantType === "free"
-                ? "Free chips"
-                : "Paid chips" 
+        grantTypeLabel: approvedGrantType === "free" ? "Free chips" : "Paid chips"
     });
 
     queueChipSave();
@@ -5948,8 +6016,7 @@ app.post("/discord/chips/approve", (req, res) => {
         playerId: request.playerId,
         playerName: request.playerName,
         amount: request.amount,
-        newBalance:
-            getChipBalance(request.playerId),
+        newBalance: getChipBalance(request.playerId),
         grantType: approvedGrantType
     });
 });
@@ -6119,6 +6186,76 @@ app.post(
         });
     }
 );
+app.get("/discord/chips/banker-owed", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const discordUserId = cleanDiscordId(req.query?.discordUserId);
+
+    if (discordUserId) {
+        const entry = state.chips.bankerCollections[discordUserId];
+
+        return res.json({
+            ok: true,
+            banker: entry
+                ? {
+                    discordUserId: entry.discordUserId,
+                    discordDisplayName: entry.discordDisplayName,
+                    totalCollected: entry.totalCollected,
+                    sinceAt: entry.sinceAt,
+                    recentHistory: (entry.history || []).slice(0, 10)
+                }
+                : {
+                    discordUserId,
+                    discordDisplayName: null,
+                    totalCollected: 0,
+                    sinceAt: null,
+                    recentHistory: []
+                }
+        });
+    }
+
+    res.json({ ok: true, bankers: publicBankerCollections() });
+});
+
+app.post("/discord/chips/banker-settle", (req, res) => {
+    if (!requireDiscordBot(req, res)) return;
+
+    const discordUserId = cleanDiscordId(req.body?.discordUserId);
+    const settledByDiscordId = String(req.body?.settledByDiscordId || "").trim();
+    const settledByDisplayName = String(req.body?.settledByDisplayName || "").trim();
+
+    if (!discordUserId) {
+        return res.status(400).json({ ok: false, error: "Missing banker discord ID" });
+    }
+
+    const result = settleBankerCollection(discordUserId, {
+        discordUserId: settledByDiscordId,
+        discordDisplayName: settledByDisplayName
+    });
+
+    if (!result.ok) {
+        return res.status(400).json(result);
+    }
+
+    addDiscordEvent("banker-settled", {
+        discordUserId,
+        discordDisplayName: result.entry.discordDisplayName,
+        amount: result.settlement.amount,
+        settledByDiscordId,
+        settledByDisplayName
+    });
+
+    res.json({
+        ok: true,
+        settlement: result.settlement,
+        banker: {
+            discordUserId: result.entry.discordUserId,
+            discordDisplayName: result.entry.discordDisplayName,
+            totalCollected: result.entry.totalCollected,
+            sinceAt: result.entry.sinceAt
+        }
+    });
+});
 app.get("/discord/chips/player-audit", (req, res) => {
     if (!requireDiscordBot(req, res)) return;
 
