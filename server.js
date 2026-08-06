@@ -2720,23 +2720,6 @@ function moveToNextBlackjackTurn() {
 
     const bj = state.blackjack;
 
-    console.log(
-        "MOVE NEXT TURN",
-        JSON.stringify(
-            bj.players.map(p => ({
-                player: p.playerName,
-                activeHand: p.activeHand,
-                hands: p.hands.map((h, i) => ({
-                    index: i,
-                    finished: h.finished,
-                    status: h.status,
-                    total: handValue(h.cards)
-                }))
-            })),
-            null,
-            2
-        )
-    );
 
     while (bj.currentTurnIndex < bj.players.length) {
         const player = bj.players[bj.currentTurnIndex];
@@ -2753,15 +2736,7 @@ function moveToNextBlackjackTurn() {
         for (let i = player.activeHand; i < player.hands.length; i++) {
             const hand = player.hands[i];
 
-            console.log("Checking blackjack hand", {
-                player: player.playerName,
-                handIndex: i,
-                activeHand: player.activeHand,
-                finished: hand.finished,
-                status: hand.status,
-                cards: hand.cards,
-                total: handValue(hand.cards)
-            });
+          
 
             if (!hand.finished) {
                 player.activeHand = i;
@@ -2779,20 +2754,14 @@ function moveToNextBlackjackTurn() {
         bj.currentTurnIndex++;
     }
 
-    console.log("No playable hands left, finishing round.");
+   
 
     finishBlackjackRound();
 }
 function finishBlackjackRound() {
     const bj = state.blackjack;
 
-    console.log("finishBlackjackRound() called", {
-        status: bj.status,
-        currentTurnIndex: bj.currentTurnIndex,
-        players: bj.players.length,
-        stack: new Error().stack
-    });
-
+ 
     if (bj.status !== "playing") {
         return;
     }
