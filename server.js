@@ -2717,7 +2717,6 @@ function scheduleBlackjackTurnTimeout() {
         moveToNextBlackjackTurn();
     }, BLACKJACK_TURN_TIMEOUT_MS);
 }
-
 function moveToNextBlackjackTurn() {
     clearBlackjackTurnTimer();
 
@@ -2733,9 +2732,17 @@ function moveToNextBlackjackTurn() {
 
         player.activeHand ??= 0;
 
-       
         while (player.activeHand < player.hands.length) {
             const hand = player.hands[player.activeHand];
+
+            console.log("Checking blackjack hand", {
+                player: player.playerName,
+                activeHand: player.activeHand,
+                finished: hand.finished,
+                status: hand.status,
+                cards: hand.cards,
+                total: handValue(hand.cards)
+            });
 
             if (!hand.finished && hand.status === "playing") {
                 scheduleBlackjackTurnTimeout();
@@ -2745,17 +2752,22 @@ function moveToNextBlackjackTurn() {
             player.activeHand++;
         }
 
-       
         player.finished = true;
-
         bj.currentTurnIndex++;
     }
 
+    console.log("No playable hands left, finishing round.");
     finishBlackjackRound();
 }
-
 function finishBlackjackRound() {
     const bj = state.blackjack;
+
+    console.log("finishBlackjackRound() called", {
+        status: bj.status,
+        currentTurnIndex: bj.currentTurnIndex,
+        players: bj.players.length,
+        stack: new Error().stack
+    });
 
     if (bj.status !== "playing") {
         return;
@@ -2763,11 +2775,9 @@ function finishBlackjackRound() {
 
     clearBlackjackTurnTimer();
 
-    
     bj.status = "finished";
     bj.currentTurnIndex = -1;
 
-    
     while (handValue(bj.dealerHand) < 17) {
         bj.dealerHand.push(drawDealerCard());
     }
