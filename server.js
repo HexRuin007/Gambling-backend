@@ -2555,60 +2555,25 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
     return shoe;
 }
 
+function drawCard() {
+    const bj = state.blackjack;
 
-function drawCard(excludedCards = []) {
-
-    if (!state.blackjack.deck.length) {
-        state.blackjack.deck = makeBlackjackShoe();
+    
+    if (!bj.deck.length) {
+        bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
     }
 
-    const excludedKeys = new Set(
-        excludedCards.map(card => `${card.rank}|${card.suit}`)
-    );
-
-    const validIndexes = [];
-
-    for (let index = 0; index < state.blackjack.deck.length; index++) {
-        const card = state.blackjack.deck[index];
-        const key = `${card.rank}|${card.suit}`;
-
-        if (!excludedKeys.has(key)) {
-            validIndexes.push(index);
-        }
-    }
-
-
-   
-    if (!validIndexes.length) {
-        state.blackjack.deck = makeBlackjackShoe();
-        return drawCard(excludedCards);
-    }
-
-
-    const pickedIndex = validIndexes[
-        crypto.randomInt(0, validIndexes.length)
-    ];
-
-    const [card] = state.blackjack.deck.splice(pickedIndex, 1);
-
-   
-    for (let i = state.blackjack.deck.length - 1; i > 0; i--) {
-        const j = crypto.randomInt(0, i + 1);
-        [state.blackjack.deck[i], state.blackjack.deck[j]] =
-            [state.blackjack.deck[j], state.blackjack.deck[i]];
-    }
-
-    return card;
+    
+    return bj.deck.pop();
 }
 
 function drawDealerCard() {
-    return drawCard(state.blackjack.dealerHand);
+    return drawCard();
 }
 
-function drawPlayerCard(hand) {
-    return drawCard(hand);
+function drawPlayerCard() {
+    return drawCard();
 }
-
 function handValue(hand) {
     let total = 0;
     let aces = 0;
@@ -2791,44 +2756,57 @@ function finishBlackjackRound() {
                 continue;
             }
 
-            const total = handValue(hand.cards);
+      const total = handValue(hand.cards);
 
-            let result;
-            let payout = 0;
+const playerBlackjack =
+    hand.cards.length === 2 &&
+    total === 21;
 
-            if (total > 21) {
+const dealerBlackjack =
+    bj.dealerHand.length === 2 &&
+    dealerTotal === 21;
 
-                result = "bust";
+let result;
+let payout = 0;
 
-            } else if (
-                hand.blackjack &&
-                dealerTotal !== 21
-            ) {
+if (total > 21) {
 
-                result = "blackjack";
-                payout = Math.floor(hand.amount * 2.5);
+    result = "bust";
 
-            } else if (dealerBust) {
+} else if (playerBlackjack && dealerBlackjack) {
 
-                result = "win";
-                payout = hand.amount * 2;
+    result = "push";
+    payout = hand.amount;
 
-            } else if (total > dealerTotal) {
+} else if (playerBlackjack) {
 
-                result = "win";
-                payout = hand.amount * 2;
+    result = "blackjack";
+    payout = Math.floor(hand.amount * 2.5);
 
-            } else if (total === dealerTotal) {
+} else if (dealerBlackjack) {
 
-                result = "push";
-                payout = hand.amount;
+    result = "lose";
 
-            } else {
+} else if (dealerBust) {
 
-                result = "lose";
+    result = "win";
+    payout = hand.amount * 2;
 
-            }
+} else if (total > dealerTotal) {
 
+    result = "win";
+    payout = hand.amount * 2;
+
+} else if (total === dealerTotal) {
+
+    result = "push";
+    payout = hand.amount;
+
+} else {
+
+    result = "lose";
+
+}
             hand.status = result;
             hand.finished = true;
             hand.payout = payout;
@@ -4022,7 +4000,7 @@ function startBlackjackRound() {
 
     bj.autoStartAt = null;
 
-    bj.deck = makeBlackjackShoe(1);
+    bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
 
     bj.dealerHand = [
         drawDealerCard(),
@@ -4032,42 +4010,56 @@ function startBlackjackRound() {
     bj.players = bj.bets.map(bet => {
 
         const cards = [];
-        cards.push(drawPlayerCard(cards));
-        cards.push(drawPlayerCard(cards));
+        cards.push(drawPlayerCard());
+        cards.push(drawPlayerCard());
 
         const total = handValue(cards);
+
+        const blackjack =
+            cards.length === 2 &&
+            total === 21;
 
         return {
             playerId: bet.playerId,
             playerName: bet.playerName,
 
-        hands: [
-    {
-        cards,
-        amount: bet.amount,
+            hands: [
+                {
+                    cards,
+                    amount: bet.amount,
 
-        status: total === 21 ? "stand" : "playing",
+                    status: blackjack ? "stand" : "playing",
 
-        blackjack: total === 21,
-        busted: total > 21,
+                    blackjack,
+                    busted: false,
 
-        doubled: false,
-        split: false,
-        finished: total === 21,
+                    doubled: false,
+                    split: false,
+                    finished: blackjack,
 
-        payout: 0,
-        profit: -bet.amount
-    }
-],
+                    payout: 0,
+                    profit: -bet.amount
+                }
+            ],
 
             activeHand: 0,
-            finished: total === 21
+            finished: blackjack
         };
     });
 
     bj.bets = [];
     bj.status = "playing";
     bj.currentTurnIndex = 0;
+
+   
+    const dealerBlackjack =
+        bj.dealerHand.length === 2 &&
+        handValue(bj.dealerHand) === 21;
+
+    if (dealerBlackjack) {
+        finishBlackjackRound();
+        return { ok: true };
+    }
 
     while (
         bj.players[bj.currentTurnIndex] &&
