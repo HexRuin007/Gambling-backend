@@ -2717,24 +2717,26 @@ function scheduleBlackjackTurnTimeout() {
 }
 function moveToNextBlackjackTurn() {
     clearBlackjackTurnTimer();
-console.log(
-    "MOVE NEXT TURN",
-    JSON.stringify(
-        bj.players.map(p => ({
-            player: p.playerName,
-            activeHand: p.activeHand,
-            hands: p.hands.map((h, i) => ({
-                index: i,
-                finished: h.finished,
-                status: h.status,
-                total: handValue(h.cards)
-            }))
-        })),
-        null,
-        2
-    )
-);
+
     const bj = state.blackjack;
+
+    console.log(
+        "MOVE NEXT TURN",
+        JSON.stringify(
+            bj.players.map(p => ({
+                player: p.playerName,
+                activeHand: p.activeHand,
+                hands: p.hands.map((h, i) => ({
+                    index: i,
+                    finished: h.finished,
+                    status: h.status,
+                    total: handValue(h.cards)
+                }))
+            })),
+            null,
+            2
+        )
+    );
 
     while (bj.currentTurnIndex < bj.players.length) {
         const player = bj.players[bj.currentTurnIndex];
@@ -2746,27 +2748,39 @@ console.log(
 
         player.activeHand ??= 0;
 
-  let foundHand = false;
+        let foundHand = false;
 
-for (let i = player.activeHand ?? 0; i < player.hands.length; i++) {
-    const hand = player.hands[i];
+        for (let i = player.activeHand; i < player.hands.length; i++) {
+            const hand = player.hands[i];
 
-    if (!hand.finished) {
-        player.activeHand = i;
-        scheduleBlackjackTurnTimeout();
-        foundHand = true;
-        break;
+            console.log("Checking blackjack hand", {
+                player: player.playerName,
+                handIndex: i,
+                activeHand: player.activeHand,
+                finished: hand.finished,
+                status: hand.status,
+                cards: hand.cards,
+                total: handValue(hand.cards)
+            });
+
+            if (!hand.finished) {
+                player.activeHand = i;
+                scheduleBlackjackTurnTimeout();
+                foundHand = true;
+                break;
+            }
+        }
+
+        if (foundHand) {
+            return;
+        }
+
+        player.finished = true;
+        bj.currentTurnIndex++;
     }
-}
-
-if (foundHand) {
-    return;
-}
-
-player.finished = true;
-bj.currentTurnIndex++;
 
     console.log("No playable hands left, finishing round.");
+
     finishBlackjackRound();
 }
 function finishBlackjackRound() {
