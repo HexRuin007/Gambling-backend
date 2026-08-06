@@ -5198,6 +5198,11 @@ app.post("/chips/grant", (req, res) => {
             ? "free"
             : "paid";
 
+    const bankerDiscordId = cleanDiscordId(req.body?.bankerDiscordId);
+    const bankerDisplayName = String(req.body?.bankerDisplayName || "In-app banker")
+        .trim()
+        .slice(0, 80);
+
     let request = null;
 
     if (requestId) {
@@ -5254,6 +5259,22 @@ app.post("/chips/grant", (req, res) => {
             ok: false,
             error: "Could not grant chips"
         });
+    }
+
+    // Only track cash collection when a real pending PAID request was approved,
+    // and we know which banker did it. Manual grants are never counted.
+    if (request && grantType === "paid") {
+        if (bankerDiscordId) {
+            recordBankerCollection(bankerDiscordId, bankerDisplayName, amount, {
+                requestId: request.requestId,
+                playerId: request.playerId,
+                playerName: request.playerName
+            });
+        } else {
+            console.warn(
+                `Paid chip request ${request.requestId} approved in-app without a bankerDiscordId — collection not tracked`
+            );
+        }
     }
 
     if (request) {
