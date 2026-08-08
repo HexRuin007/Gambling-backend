@@ -41,6 +41,8 @@ const LOTTERY_TICKET_PRICE = 100_000_000;
 const LOTTERY_DRAW_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; 
 const LOTTERY_MAX_HISTORY = 50;
 let lotteryDrawTimer = null;
+const HILO_HOUSE_FACTOR = 0.92;
+const HILO_MAX_HISTORY = 100;
 const SCRATCH_SYMBOLS = [
     { id: "blank",  label: "🖕", weight: 40, multiplier: 0   }, 
     { id: "pear",   label: "🍐", weight: 25, multiplier: 1.5 },
@@ -259,6 +261,10 @@ const state = {
         games: {},
         history: []
     },
+    hilo: {
+    games: {},
+    history: []
+},
 
     dailySpin: {
         claims: {},
@@ -428,6 +434,14 @@ function loadChipData() {
             state.chips.leaderboardStats =
                 saved.leaderboardStats;
         }
+        if (saved.hilo && typeof saved.hilo === "object") {
+    if (saved.hilo.games && typeof saved.hilo.games === "object") {
+        state.hilo.games = saved.hilo.games;
+    }
+    if (Array.isArray(saved.hilo.history)) {
+        state.hilo.history = saved.hilo.history.slice(0, HILO_MAX_HISTORY);
+    }
+}
 
         if (saved.fundingBalances && typeof saved.fundingBalances === "object") {
             state.chips.fundingBalances = saved.fundingBalances;
@@ -606,6 +620,10 @@ function saveChipDataImmediately() {
                 history: state.racing.history,
                 dailyOdds: state.racing.dailyOdds
             },
+            hilo: {
+    games: state.hilo.games,
+    history: state.hilo.history
+},
             dailySpin: {
                 claims: state.dailySpin.claims,
                 bonusSpins: state.dailySpin.bonusSpins,
@@ -4023,6 +4041,7 @@ function publicState(playerId = "") {
         wheel: publicWheelState(),
         blackjack: publicBlackjackState(),
         racing: publicRacingState(),
+        hilo: publicHiloState(),
         lottery: publicLotteryState(playerId)
     };
 }
@@ -4403,6 +4422,105 @@ function scheduleRacingAutoStart() {
         startHorseRace();
     }, AUTO_START_DELAY_MS);
 }
+function ensureHiloState() {
+    if (!state.hilo || typeof state.hilo !== "object") {
+        state.hilo = { games: {}, history: [] };
+    }
+    if (!state.hilo.games || typeof state.hilo.games !== "object") {
+        state.hilo.games = {};
+    }
+    if (!Array.isArray(state.hilo.history)) {
+        state.hilo.history = [];
+    }
+    return state.hilo;
+}
+
+function drawHiloCard() {
+    return crypto.randomInt(2, 15); // 2..14, 14 = Ace
+}
+
+function hiloStepMultiplier(currentValue, guess) {
+    const higherCount = 14 - currentValue;
+    const lowerCount = currentValue - 2;
+    const count = guess === "higher" ? higherCount : lowerCount;
+
+    if (count <= 0) return 0;
+
+    const probability = count / 13;
+    const fairMultiplier = 1 / probability;
+
+    return Math.max(
+        1.01,
+        Math.floor(fairMultiplier * HILO_HOUSE_FACTOR * 100) / 100
+    );
+}
+
+function ensureHiloGameId(game) {
+    if (!game) return "";
+    if (!game.gameId) {
+        game.gameId = crypto.randomBytes(8).toString("hex");
+        queueChipSave();
+    }
+    return game.gameId;
+}
+
+function publicHiloGame(game) {
+    if (!game) return null;
+    ensureHiloGameId(game);
+
+    return {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        currentValue: game.currentValue,
+        streak: game.streak,
+        multiplier: Math.round((game.multiplier || 1) * 100) / 100,
+        potentialPayout: Math.floor(game.betAmount * (game.multiplier || 1)),
+        status: game.status,
+        createdAt: game.createdAt
+    };
+}
+
+function publicHiloState() {
+    const hilo = ensureHiloState();
+    const games = {};
+
+    for (const [playerId, game] of Object.entries(hilo.games)) {
+        games[playerId] = publicHiloGame(game);
+    }
+
+    return {
+        games,
+        history: hilo.history.slice(0, 50).map(entry => ({ ...entry }))
+    };
+}
+
+function finishHiloGame(game, result, payout) {
+    const hilo = ensureHiloState();
+
+    const entry = {
+        gameId: game.gameId,
+        playerId: game.playerId,
+        playerName: game.playerName,
+        betAmount: game.betAmount,
+        streak: game.streak,
+        multiplier: Math.round((game.multiplier || 1) * 100) / 100,
+        result,
+        payout,
+        profit: payout - game.betAmount,
+        createdAt: Date.now()
+    };
+
+    hilo.history.unshift(entry);
+    hilo.history = hilo.history.slice(0, HILO_MAX_HISTORY);
+
+    delete hilo.games[game.playerId];
+    queueChipSave();
+
+    return entry;
+}
+
 
 app.get("/", (req, res) => {
     res.json({ ok: true, app: "TT Shared Casino", wheelBets: state.wheel.bets.length, blackjackStatus: state.blackjack.status, racingBets: state.racing.bets.length, racing: state.racing.racing });
@@ -4878,6 +4996,10 @@ if (lotteryEntry) {
     delete state.chips.leaderboardStats[playerId];
     delete state.chips.fundingBalances[playerId];
     delete state.chips.lastBetFunding[playerId];
+    delete state.hilo.games[playerId];
+state.hilo.history = state.hilo.history.filter(
+    entry => cleanPlayerId(entry.playerId) !== playerId
+);
 
     state.chips.requests = state.chips.requests.filter(
         request => cleanPlayerId(request.playerId) !== playerId
@@ -5028,6 +5150,8 @@ app.post("/chips/reset-all", (req, res) => {
     state.chips.leaderboardStats = {};
     state.chips.fundingBalances = {};
     state.chips.lastBetFunding = {};
+    state.hilo.games = {};
+state.hilo.history = [];
     state.lottery.tickets = {};
     state.lottery.totalTickets = 0;
     state.lottery.history = [];
@@ -5301,8 +5425,7 @@ app.post("/chips/grant", (req, res) => {
         });
     }
 
-    // Only track cash collection when a real pending PAID request was approved,
-    // and we know which banker did it. Manual grants are never counted.
+   
     if (request && grantType === "paid") {
         if (bankerDiscordId) {
             recordBankerCollection(bankerDiscordId, bankerDisplayName, amount, {
@@ -5402,7 +5525,7 @@ app.post("/chips/withdraw-request", (req, res) => {
             }
         );
 
-        // Hold the new amount
+     
         const removed = debitChips(
             playerId,
             amount,
@@ -5575,6 +5698,169 @@ app.post("/chips/cashout", (req, res) => {
         playerId,
         playerName,
         amountCompleted: amount,
+        balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
+app.post("/hilo/start", (req, res) => {
+    const hilo = ensureHiloState();
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const playerName = cleanPlayerName(req.body?.playerName);
+    const betAmount = cleanAmount(req.body?.amount);
+
+    if (!playerId || !playerName || !betAmount) {
+        return res.status(400).json({ ok: false, error: "Invalid Hi-Low bet" });
+    }
+
+    if (hilo.games[playerId]) {
+        return res.status(409).json({
+            ok: false,
+            error: "Finish or cash out your current Hi-Low game first"
+        });
+    }
+
+    rememberPlayer(playerId, playerName);
+
+    const debit = debitChips(playerId, betAmount, {
+        playerName,
+        type: "bet",
+        gameType: "hilo",
+        note: "Hi-Low game started"
+    });
+
+    if (!debit.ok) {
+        return res.status(400).json(debit);
+    }
+
+    const game = {
+        gameId: crypto.randomBytes(8).toString("hex"),
+        playerId,
+        playerName,
+        betAmount,
+        currentValue: drawHiloCard(),
+        streak: 0,
+        multiplier: 1,
+        status: "playing",
+        createdAt: Date.now()
+    };
+
+    hilo.games[playerId] = game;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        game: publicHiloGame(game),
+        balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/hilo/guess", (req, res) => {
+    const hilo = ensureHiloState();
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const requestedGameId = String(req.body?.gameId || "").trim();
+    const guess = String(req.body?.guess || "").trim().toLowerCase();
+
+    const game = hilo.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({ ok: false, error: "No active Hi-Low game" });
+    }
+
+    ensureHiloGameId(game);
+
+    if (!requestedGameId || requestedGameId !== game.gameId) {
+        return res.status(409).json({ ok: false, error: "This Hi-Low game is no longer active" });
+    }
+
+    if (guess !== "higher" && guess !== "lower") {
+        return res.status(400).json({ ok: false, error: "Guess must be higher or lower" });
+    }
+
+    const stepMultiplier = hiloStepMultiplier(game.currentValue, guess);
+
+    if (stepMultiplier <= 0) {
+        return res.status(400).json({ ok: false, error: "That guess is impossible on this card" });
+    }
+
+    const newValue = drawHiloCard();
+    const correct = guess === "higher"
+        ? newValue > game.currentValue
+        : newValue < game.currentValue;
+
+    if (!correct) {
+        const history = finishHiloGame(game, "lost", 0);
+
+        return res.json({
+            ok: true,
+            correct: false,
+            previousValue: game.currentValue,
+            newValue,
+            history,
+            balance: getChipBalance(playerId),
+            state: publicState()
+        });
+    }
+
+    game.multiplier = Math.round((game.multiplier || 1) * stepMultiplier * 100) / 100;
+    game.streak += 1;
+    game.currentValue = newValue;
+    queueChipSave();
+
+    res.json({
+        ok: true,
+        correct: true,
+        newValue,
+        multiplier: game.multiplier,
+        game: publicHiloGame(game),
+        balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
+
+app.post("/hilo/cashout", (req, res) => {
+    const hilo = ensureHiloState();
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const requestedGameId = String(req.body?.gameId || "").trim();
+
+    const game = hilo.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({ ok: false, error: "No active Hi-Low game" });
+    }
+
+    ensureHiloGameId(game);
+
+    if (!requestedGameId || requestedGameId !== game.gameId) {
+        return res.status(409).json({ ok: false, error: "This Hi-Low game is no longer active" });
+    }
+
+    if (game.streak < 1) {
+        return res.status(400).json({
+            ok: false,
+            error: "Make at least one correct guess before cashing out"
+        });
+    }
+
+    const payout = Math.floor(game.betAmount * game.multiplier);
+
+    creditChips(playerId, payout, {
+        playerName: game.playerName,
+        type: "payout",
+        gameType: "hilo",
+        note: `Hi-Low cash-out at x${game.multiplier.toFixed(2)}`
+    });
+
+    const history = finishHiloGame(game, "cashout", payout);
+
+    res.json({
+        ok: true,
+        payout,
+        multiplier: game.multiplier,
+        history,
         balance: displayBalance(playerId),
         state: publicState()
     });
