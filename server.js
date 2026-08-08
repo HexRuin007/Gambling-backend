@@ -4436,13 +4436,19 @@ function ensureHiloState() {
 }
 
 function drawHiloCard() {
-    return crypto.randomInt(2, 15); // 2..14, 14 = Ace
+    return crypto.randomInt(2, 15); 
 }
 
 function hiloStepMultiplier(currentValue, guess) {
     const higherCount = 14 - currentValue;
     const lowerCount = currentValue - 2;
-    const count = guess === "higher" ? higherCount : lowerCount;
+    const equalCount = 1; 
+
+    let count;
+    if (guess === "higher") count = higherCount;
+    else if (guess === "lower") count = lowerCount;
+    else if (guess === "equal") count = equalCount;
+    else return 0;
 
     if (count <= 0) return 0;
 
@@ -5801,8 +5807,8 @@ app.post("/hilo/guess", (req, res) => {
         return res.status(409).json({ ok: false, error: "This Hi-Low game is no longer active" });
     }
 
-    if (guess !== "higher" && guess !== "lower") {
-        return res.status(400).json({ ok: false, error: "Guess must be higher or lower" });
+    if (guess !== "higher" && guess !== "lower" && guess !== "equal") {
+        return res.status(400).json({ ok: false, error: "Guess must be higher, lower, or equal" });
     }
 
     const stepMultiplier = hiloStepMultiplier(game.currentValue, guess);
@@ -5812,9 +5818,11 @@ app.post("/hilo/guess", (req, res) => {
     }
 
     const newValue = drawHiloCard();
-    const correct = guess === "higher"
-        ? newValue > game.currentValue
-        : newValue < game.currentValue;
+
+    let correct;
+    if (guess === "higher") correct = newValue > game.currentValue;
+    else if (guess === "lower") correct = newValue < game.currentValue;
+    else correct = newValue === game.currentValue;
 
     if (!correct) {
         const history = finishHiloGame(game, "lost", 0);
@@ -5845,7 +5853,6 @@ app.post("/hilo/guess", (req, res) => {
         state: publicState()
     });
 });
-
 app.post("/hilo/cashout", (req, res) => {
     const hilo = ensureHiloState();
 
