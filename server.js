@@ -275,16 +275,17 @@ const state = {
         activeSpin: null,
         autoStartAt: null
     },
-    blackjack: {
-        bets: [],
-        players: [],
-        dealerHand: [],
-        deck: [],
-        status: "waiting", 
-        currentTurnIndex: 0,
-        history: [],
-        autoStartAt: null
-    },
+blackjack: {
+    bets: [],
+    players: [],
+    dealerHand: [],
+    deck: [],
+    reshuffleAt: null,
+    status: "waiting",
+    currentTurnIndex: 0,
+    history: [],
+    autoStartAt: null
+},
 racing: {
     horses: [
         { id: "Nunu", name: "Nunu Royale" },
@@ -2641,7 +2642,7 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
         }
     }
 
-  
+    
     for (let i = shoe.length - 1; i > 0; i--) {
         const j = crypto.randomInt(0, i + 1);
         [shoe[i], shoe[j]] = [shoe[j], shoe[i]];
@@ -2649,23 +2650,60 @@ function makeBlackjackShoe(deckCount = BLACKJACK_DECK_COUNT) {
 
     return shoe;
 }
+function ensureBlackjackShoe() {
+    const bj = state.blackjack;
+
+   
+    if (!Array.isArray(bj.deck) || bj.deck.length === 0) {
+        bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
+
+        console.log(
+            `[BLACKJACK] New shuffled shoe created (${bj.deck.length} cards)`
+        );
+
+        return;
+    }
+        if (!Number.isFinite(bj.reshuffleAt)) {
+        bj.reshuffleAt = crypto.randomInt(15, 26);
+    }
+
+    if (bj.deck.length <= bj.reshuffleAt) {
+        console.log(
+            `[BLACKJACK] Shoe low (${bj.deck.length} cards). ` +
+            `Creating a new shuffled shoe.`
+        );
+
+        bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
+
+       
+        bj.reshuffleAt = crypto.randomInt(15, 26);
+
+        console.log(
+            `[BLACKJACK] New shoe shuffled (${bj.deck.length} cards). ` +
+            `Next reshuffle threshold: ${bj.reshuffleAt} cards`
+        );
+    }
+}
 
 function drawCard() {
     const bj = state.blackjack;
 
-    
-    if (!bj.deck.length) {
+    if (!Array.isArray(bj.deck) || bj.deck.length === 0) {
+        console.warn(
+            "[BLACKJACK] Shoe exhausted during a round. " +
+            "Creating emergency replacement shoe."
+        );
+
         bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
+        bj.reshuffleAt = crypto.randomInt(15, 26);
     }
 
-    
     return bj.deck.pop();
 }
 
 function drawDealerCard() {
     return drawCard();
 }
-
 function drawPlayerCard() {
     return drawCard();
 }
@@ -2990,7 +3028,9 @@ function resetBlackjackTable() {
 
     bj.players = [];
     bj.dealerHand = [];
-    bj.deck = [];
+    if (!Array.isArray(bj.deck)) {
+        bj.deck = [];
+    }
     bj.status = "waiting";
     bj.currentTurnIndex = 0;
     bj.turnExpiresAt = null;
@@ -4096,7 +4136,7 @@ function startBlackjackRound() {
 
     bj.autoStartAt = null;
 
-    bj.deck = makeBlackjackShoe(BLACKJACK_DECK_COUNT);
+   ensureBlackjackShoe();
 
     bj.dealerHand = [
         drawDealerCard(),
