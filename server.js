@@ -5755,6 +5755,32 @@ app.post("/hilo/start", (req, res) => {
         state: publicState()
     });
 });
+app.post("/hilo/forfeit", (req, res) => {
+    const hilo = ensureHiloState();
+
+    const playerId = cleanPlayerId(req.body?.playerId);
+    const game = hilo.games[playerId];
+
+    if (!game) {
+        return res.status(404).json({ ok: false, error: "No active Hi-Low game" });
+    }
+
+    creditChips(playerId, game.betAmount, {
+        playerName: game.playerName,
+        type: "bet-refund",
+        gameType: "hilo",
+        note: "Hi-Low game cancelled"
+    });
+
+    const history = finishHiloGame(game, "forfeit", game.betAmount);
+
+    res.json({
+        ok: true,
+        history,
+        balance: displayBalance(playerId),
+        state: publicState()
+    });
+});
 
 app.post("/hilo/guess", (req, res) => {
     const hilo = ensureHiloState();
